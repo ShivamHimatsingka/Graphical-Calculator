@@ -32,7 +32,7 @@ A desktop graphing calculator designed for fast mathematical exploration, with i
 ## 🖥️ Preview
 
 <p align="center">
-  <img src="screenshots/preview.png" width="850">
+  <img src="screenshot/screenshot.png" width="850">
 </p>
 
 ---
