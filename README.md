@@ -37,9 +37,8 @@ Plot equations, manipulate variables with interactive sliders, track points on c
 
 - **Python 3.10+**
 - macOS, Windows, or Linux
-- pip install PySide6 pyqtgraph numpy sympy
 
-Check your Python version:
+Check your Python version & install dependencies:
 
 ```bash
 python3 --version
