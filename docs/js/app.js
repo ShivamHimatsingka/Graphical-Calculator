@@ -1622,6 +1622,10 @@
       window.__mlOK = !!(window.mlReady && await Promise.race([window.mlReady, timeout]));
     } catch (e) { window.__mlOK = false; }
     if (window.__mlOK) configureMathLive();
+    if (typeof Graph === 'undefined' || typeof Graph3D === 'undefined' || typeof Geo === 'undefined' || typeof Sci === 'undefined' || typeof LX === 'undefined') {
+      document.body.insertAdjacentHTML('afterbegin', '<div style="position:fixed;inset:0;z-index:999;display:flex;align-items:center;justify-content:center;background:#fff;color:#222;font:16px sans-serif;text-align:center;padding:24px">Some files failed to load (network problem?).<br>Please <a href="" onclick="location.reload();return false">reload the page</a>.</div>');
+      return;
+    }
     init();
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
