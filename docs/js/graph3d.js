@@ -139,11 +139,19 @@
       const Z = [];
       for (let j = 0; j <= n; j++) { const row = []; for (let i = 0; i <= n; i++) { let z = p.f(xs[i], ys[j]); if (typeof z !== 'number' || !Number.isFinite(z) || (p.cond && !p.cond(xs[i], ys[j]))) z = NaN; row.push(z); } Z.push(row); }
       const zlo = b[4], zhi = b[5];
+      if (!p.helper) {
+        const pv = [];
+        for (let j = 0; j <= n; j++) for (let i = 0; i <= n; i++) {
+          const z = Z[j][i]; if (!(z >= zlo && z <= zhi)) continue;
+          const pr = this._proj(this._n(xs[i], ys[j], z)); if (pr) pv.push([pr[0], pr[1], pr[2], xs[i], ys[j]]);
+        }
+        p._pv = pv;
+      }
       for (let j = 0; j < n; j++) {
         for (let i = 0; i < n; i++) {
           const z00 = Z[j][i], z10 = Z[j][i + 1], z11 = Z[j + 1][i + 1], z01 = Z[j + 1][i];
           if (!(z00 >= zlo && z00 <= zhi && z10 >= zlo && z10 <= zhi && z11 >= zlo && z11 <= zhi && z01 >= zlo && z01 <= zhi)) continue;
-          this._poly(prims, [[xs[i], ys[j], z00], [xs[i + 1], ys[j], z10], [xs[i + 1], ys[j + 1], z11], [xs[i], ys[j + 1], z01]], col, 1);
+          this._poly(prims, [[xs[i], ys[j], z00], [xs[i + 1], ys[j], z10], [xs[i + 1], ys[j + 1], z11], [xs[i], ys[j + 1], z01]], col, p.alpha || 1);
         }
       }
     }
@@ -163,7 +171,7 @@
       }
       for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
         const a = G[j][i], bb = G[j][i + 1], c = G[j + 1][i + 1], d = G[j + 1][i];
-        if (a && bb && c && d) this._poly(prims, [a, bb, c, d], col, 1);
+        if (a && bb && c && d) this._poly(prims, [a, bb, c, d], col, p.alpha || 1);
       }
     }
 
@@ -188,11 +196,12 @@
           for (const c of T) (cv[c] > 0 ? ins : outs).push(c);
           if (!ins.length || !outs.length) continue;
           const E = (a, c) => interp(cp[a], cp[c], cv[a], cv[c]);
-          if (ins.length === 1) this._poly(prims, [E(ins[0], outs[0]), E(ins[0], outs[1]), E(ins[0], outs[2])], col, 1);
-          else if (ins.length === 3) this._poly(prims, [E(outs[0], ins[0]), E(outs[0], ins[1]), E(outs[0], ins[2])], col, 1);
+          const al = p.alpha || 1;
+          if (ins.length === 1) this._poly(prims, [E(ins[0], outs[0]), E(ins[0], outs[1]), E(ins[0], outs[2])], col, al);
+          else if (ins.length === 3) this._poly(prims, [E(outs[0], ins[0]), E(outs[0], ins[1]), E(outs[0], ins[2])], col, al);
           else {
             const q = [E(ins[0], outs[0]), E(ins[0], outs[1]), E(ins[1], outs[1]), E(ins[1], outs[0])];
-            this._poly(prims, [q[0], q[1], q[2]], col, 1); this._poly(prims, [q[0], q[2], q[3]], col, 1);
+            this._poly(prims, [q[0], q[1], q[2]], col, al); this._poly(prims, [q[0], q[2], q[3]], col, al);
           }
         }
       }
@@ -304,8 +313,27 @@
     }
 
     /* ---------- interaction ---------- */
+    _ray(sx, sy) {
+      const ux = (sx - this.w / 2) / this.f, uy = -(sy - this.h / 2) / this.f;
+      return { o: this.cp, d: [this.fwd[0] + ux * this.right[0] + uy * this.up[0], this.fwd[1] + ux * this.right[1] + uy * this.up[1], this.fwd[2] + ux * this.right[2] + uy * this.up[2]] };
+    }
+    _denorm(n) {
+      const b = this.box;
+      return [(b[0] + b[1]) / 2 + n[0] * (b[1] - b[0]) / 2, (b[2] + b[3]) / 2 + n[1] * (b[3] - b[2]) / 2, (b[4] + b[5]) / 2 + n[2] * (b[5] - b[4]) / 2];
+    }
+    _hitPoint(mx, my) {
+      for (const p of this.plots) {
+        if (p.hidden || p.kind !== 'pt3' || !p.drag) continue;
+        const q = p.get(); if (!q || !q.every(Number.isFinite)) continue;
+        const pr = this._proj(this._n(q[0], q[1], q[2]));
+        if (pr && Math.hypot(pr[0] - mx, pr[1] - my) < 13) return { p, q };
+      }
+      return null;
+    }
     _bind() {
-      const c = this.canvas; const ptrs = new Map(); let last = null, pinch = 0;
+      const c = this.canvas; const ptrs = new Map(); let last = null, pinch = 0, moved = 0, drag = null, startXY = null;
+      const pos = (e) => { const r = c.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+      const step = (range) => Math.pow(10, Math.floor(Math.log10(range / 300)));
       c.style.touchAction = 'none'; c.style.cursor = 'grab';
       c.addEventListener('contextmenu', (e) => e.preventDefault());
       c.addEventListener('wheel', (e) => {
@@ -315,12 +343,16 @@
         this.requestDraw(true);
       }, { passive: false });
       c.addEventListener('pointerdown', (e) => {
-        c.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, [e.clientX, e.clientY]); last = [e.clientX, e.clientY];
-        if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; pinch = Math.hypot(a[0] - b[0], a[1] - b[1]); }
+        c.setPointerCapture(e.pointerId); const [mx, my] = pos(e);
+        ptrs.set(e.pointerId, [e.clientX, e.clientY]); last = [e.clientX, e.clientY]; moved = 0; startXY = [mx, my]; drag = null;
+        if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; pinch = Math.hypot(a[0] - b[0], a[1] - b[1]); return; }
+        const hit = this._hitPoint(mx, my);
+        if (hit) { drag = hit; c.style.cursor = 'move'; return; }
         c.style.cursor = 'grabbing';
       });
       c.addEventListener('pointermove', (e) => {
-        if (!ptrs.has(e.pointerId)) return;
+        const [mx, my] = pos(e);
+        if (!ptrs.has(e.pointerId)) { const h = this._hitPoint(mx, my); c.style.cursor = h ? 'move' : 'grab'; return; }
         ptrs.set(e.pointerId, [e.clientX, e.clientY]);
         if (ptrs.size >= 2) {
           const [a, b] = [...ptrs.values()], d = Math.hypot(a[0] - b[0], a[1] - b[1]);
@@ -328,13 +360,52 @@
           pinch = d; this.requestDraw(true); return;
         }
         const dx = e.clientX - last[0], dy = e.clientY - last[1]; last = [e.clientX, e.clientY];
+        moved += Math.abs(dx) + Math.abs(dy);
+        if (drag) {
+          const b = this.box, ray = this._ray(mx, my), o = ray.o, d = ray.d;
+          const nq = this._n(drag.q[0], drag.q[1], drag.q[2]);
+          let np;
+          if (e.shiftKey) { // vertical move on a camera-facing vertical plane
+            const hl = Math.hypot(o[0], o[1]) || 1, nh = [o[0] / hl, o[1] / hl, 0];
+            const den = d[0] * nh[0] + d[1] * nh[1];
+            if (Math.abs(den) < 1e-9) return;
+            const t = ((nq[0] - o[0]) * nh[0] + (nq[1] - o[1]) * nh[1]) / den;
+            np = [nq[0], nq[1], o[2] + t * d[2]];
+          } else {
+            if (Math.abs(d[2]) < 1e-9) return;
+            const t = (nq[2] - o[2]) / d[2];
+            np = [o[0] + t * d[0], o[1] + t * d[1], nq[2]];
+          }
+          const w3 = this._denorm(np);
+          const sx = step(b[1] - b[0]), sy = step(b[3] - b[2]), sz = step(b[5] - b[4]);
+          const rd = (v, st, lo, hi) => clamp(Math.round(v / st) * st, lo, hi);
+          const nv = [rd(w3[0], sx, b[0], b[1]), rd(w3[1], sy, b[2], b[3]), rd(w3[2], sz, b[4], b[5])];
+          drag.q = nv; drag.p.drag(nv[0], nv[1], nv[2]);
+          return;
+        }
         this.cam.az -= dx * 0.008;
         this.cam.el = clamp(this.cam.el + dy * 0.008, -1.5, 1.5);
         this.requestDraw(true);
       });
-      const up = (e) => { ptrs.delete(e.pointerId); pinch = 0; c.style.cursor = 'grab'; };
-      c.addEventListener('pointerup', up); c.addEventListener('pointercancel', up);
+      const up = (e) => {
+        const [mx, my] = pos(e);
+        const wasClick = ptrs.size === 1 && moved < 5 && !drag;
+        ptrs.delete(e.pointerId); pinch = 0; drag = null; c.style.cursor = 'grab';
+        if (wasClick && this.onPick) this._pick(mx, my);
+      };
+      c.addEventListener('pointerup', up); c.addEventListener('pointercancel', (e) => { ptrs.delete(e.pointerId); drag = null; });
       c.addEventListener('dblclick', () => this.resetView());
+    }
+    _pick(mx, my) {
+      let best = null, bd = 18;
+      for (const p of this.plots) {
+        if (p.hidden || p.kind !== 'surf' || p.helper || !p._pv) continue;
+        for (const v of p._pv) {
+          const d = Math.hypot(v[0] - mx, v[1] - my);
+          if (d < bd - 0.01 || (best && Math.abs(d - bd) <= 0.01 && v[2] < best.z)) { bd = d; best = { plot: p, x: v[3], y: v[4], z: v[2] }; }
+        }
+      }
+      this.onPick(best ? { plot: best.plot, x: best.x, y: best.y } : null);
     }
 
     exportPNG(cb) {

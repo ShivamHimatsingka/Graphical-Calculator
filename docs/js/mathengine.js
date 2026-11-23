@@ -275,8 +275,17 @@
     boxplot: (L, w) => ({ __plot: 'box', data: nums(L), w: Number.isFinite(w) && w > 0 ? w : 1 }),
     dotplot: (L, w) => ({ __plot: 'dots', data: nums(L), w: Number.isFinite(w) && w > 0 ? w : 0 }),
   });
+  Object.assign(R, {
+    barplot: (L, w) => ({ __plot: 'bar', data: nums(L), w: Number.isFinite(w) && w > 0 ? w : 0.8 }),
+    mode: (...a) => { const v = flatNums(a); if (!v.length) return NaN; const c = new Map(); v.forEach((x) => c.set(x, (c.get(x) || 0) + 1)); let best = v[0], bc = 0; for (const [k, n] of c) if (n > bc || (n === bc && k < best)) { best = k; bc = n; } return best; },
+    percentile: (L, p) => { const v = nums(L).sort((x, y) => x - y); if (!v.length || !(p >= 0 && p <= 1)) return NaN; const pos = p * (v.length - 1), lo = Math.floor(pos), hi = Math.ceil(pos); return v[lo] + (v[hi] - v[lo]) * (pos - lo); },
+    cumsum: (L) => { let s2 = 0; return (isA(L) ? L : [L]).map((v) => (s2 += v)); },
+    diff: (L) => { const a = isA(L) ? L : [L]; return a.slice(1).map((v, i) => v - a[i]); },
+    reverse: (L) => (isA(L) ? L.slice().reverse() : L),
+    skewness: (...a) => { const v = flatNums(a), m = meanOf(v), sd = Math.sqrt(varOf(v, 0)); return v.length ? v.reduce((s2, x) => s2 + ((x - m) / sd) ** 3, 0) / v.length : NaN; },
+  });
   function clampQ(q) { return Math.max(0, Math.min(4, Number.isFinite(q) ? q : 2)); }
-  const AGG = new Set(['histogram', 'boxplot', 'dotplot', 'shuffle', 'total', 'mean', 'median', 'min', 'max', 'count', 'length', 'stdev', 'stdevp', 'variance', 'varp', 'mad', 'quartile', 'corr', 'cov', 'sort', 'unique', 'join']);
+  const AGG = new Set(['barplot', 'mode', 'percentile', 'cumsum', 'diff', 'reverse', 'skewness', 'histogram', 'boxplot', 'dotplot', 'shuffle', 'total', 'mean', 'median', 'min', 'max', 'count', 'length', 'stdev', 'stdevp', 'variance', 'varp', 'mad', 'quartile', 'corr', 'cov', 'sort', 'unique', 'join']);
   const AGG_ALWAYS = new Set([...AGG].filter((x) => x !== 'min' && x !== 'max'));
   const LISTVARS = new Set();
   const CXLOCAL = new Set();  // parameters of the function being compiled that hold complex values
@@ -757,7 +766,7 @@
       case 'bin': return listValued(n.a, locals) || listValued(n.b, locals);
       case 'tuple': return n.items.some((i) => listValued(i, locals));
       case 'call':
-        if (n.n === 'sort' || n.n === 'unique' || n.n === 'join' || n.n === 'shuffle' || (n.n === 'random' && n.args.length)) return true;
+        if (n.n === 'sort' || n.n === 'unique' || n.n === 'join' || n.n === 'shuffle' || n.n === 'cumsum' || n.n === 'diff' || n.n === 'reverse' || (n.n === 'random' && n.args.length)) return true;
         if (AGG.has(n.n) || SPECIAL.has(n.n)) return false;
         return n.args.some((a) => listValued(a, locals));
       default: return false;

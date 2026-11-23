@@ -44,6 +44,14 @@
     <div id="tip"></div>
     <div id="coords"></div>
     <button id="btnExpand" class="ib float" title="Show expression list" aria-label="Show list" hidden></button>
+    <div id="geobar" hidden></div>
+    <div id="surfbar" hidden>
+      <label><input type="checkbox" id="spOn"> Tangent plane</label>
+      <span>at x <input type="number" id="spA" step="0.1" value="0" aria-label="Plane x"> y <input type="number" id="spB" step="0.1" value="0" aria-label="Plane y"></span>
+      <button id="spAdd" class="ghost" title="Add the plane to the expression list">+ Add plane</button>
+      <div id="spInfo"></div>
+      <div class="sphint">Tip: click a surface to place the point · drag 3D points (Shift = up/down)</div>
+    </div>
     <div id="curvebar" hidden>
       <label><input type="checkbox" id="tTan"> Tangent</label>
       <label><input type="checkbox" id="tSec"> Secant</label>
@@ -60,6 +68,7 @@
     </div>
   </main>
 </div>
+<div id="sci" hidden></div>
 <div id="pop" class="popover" hidden></div>
 <div id="gset" class="popover" hidden></div>
 <div id="toast" role="status"></div>
@@ -80,6 +89,8 @@ window.mlReady = new Promise(function (resolve) {
 <script src="js/latex.js"></script>
 <script src="js/graph.js"></script>
 <script src="js/graph3d.js"></script>
+<script src="js/geometry.js"></script>
+<script src="js/scientific.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

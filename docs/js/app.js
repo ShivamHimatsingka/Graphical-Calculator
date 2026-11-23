@@ -29,13 +29,13 @@
   const recs = new Map();   // id -> evaluation record
   const rows = new Map();   // id -> row dom handles
   const playing = new Set();
-  let graph = null, graph3 = null;
+  let graph = null, graph3 = null, geo = null, sci = null;
   const activeGraph = () => (state.settings.mode === '3d' ? graph3 : graph);
   let curOrder = [];        // computed variable evaluation order
   let lastEd = null;
   let hist = [], hIdx = -1, commitTimer = 0, saveTimer = 0, evalTimer = 0;
 
-  function defaultSettings() { return { mode: '2d', box: [-5, 5, -5, 5, -5, 5], editor: 'live', grid: true, minor: true, numbers: true, piX: false, deg: false, theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light' }; }
+  function defaultSettings() { return { app: 'graph', mode: '2d', box: [-5, 5, -5, 5, -5, 5], editor: 'live', grid: true, minor: true, numbers: true, piX: false, deg: false, theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light' }; }
   function newItem(type, props) {
     const it = Object.assign({ id: nextId++, type, text: '', hidden: false, line: 'solid', width: 2.5 }, props || {});
     if (type === 'expr' || type === 'table') {
@@ -327,12 +327,37 @@
       try { classify(rec, defined, fnDefs, plots); } catch (e) { rec.err = e.message || 'Error'; }
     }
     const p2 = plots.filter((q) => !THREE_D.has(q.kind)), p3 = plots.filter((q) => THREE_D.has(q.kind));
-    graph.setPlots(p2); graph3.setPlots(p3);
+    graph.setPlots(state.settings.app === 'geometry' ? [geo.plot] : p2); plots3Base = p3; applyPlane();
     if (p3.length && !p2.some((q) => !q.hidden) && state.settings.mode !== '3d') { setMode('3d'); return; }
     updateAllRows();
     graph.requestDraw(false); graph3.requestDraw(false);
   }
 
+  let plots3Base = [];
+  const plane = { on: false, a: 0, b: 0, id: null, info: null };
+  function applyPlane() {
+    const extra = [];
+    const surfs = plots3Base.filter((q) => q.kind === 'surf' && !q.hidden);
+    const bar = $('#surfbar');
+    if (bar) bar.hidden = !(state.settings.mode === '3d' && surfs.length);
+    plane.info = null;
+    if (plane.on && surfs.length) {
+      const sp = surfs.find((q) => q.id === plane.id) || surfs[0];
+      const f = (x, y) => { const v = sp.f(x, y); return Number.isFinite(v) ? v : NaN; };
+      const a = plane.a, b = plane.b, z0 = f(a, b);
+      const h = 1e-5 * Math.max(1, Math.abs(a), Math.abs(b));
+      const fx = (f(a + h, b) - f(a - h, b)) / (2 * h), fy = (f(a, b + h) - f(a, b - h)) / (2 * h);
+      if ([z0, fx, fy].every(Number.isFinite)) {
+        extra.push({ id: -1, kind: 'surf', helper: true, alpha: 0.38, color: '#fa7e19', f: (x, y) => z0 + fx * (x - a) + fy * (y - b) });
+        extra.push({ id: -2, kind: 'pt3', get: () => [a, b, z0], color: '#fa7e19', size: 6 });
+        plane.info = { a, b, z0, fx, fy, c: z0 - fx * a - fy * b };
+      }
+    }
+    const info = $('#spInfo');
+    if (info) { const t = plane.info ? `z = ${fmt(plane.info.fx, 4)}x ${plane.info.fy < 0 ? '−' : '+'} ${fmt(Math.abs(plane.info.fy), 4)}y ${plane.info.c < 0 ? '−' : '+'} ${fmt(Math.abs(plane.info.c), 4)}\n(slope in x: ${fmt(plane.info.fx, 4)}, in y: ${fmt(plane.info.fy, 4)})` : ''; if (info.textContent !== t) info.textContent = t; }
+    graph3.setPlots(plots3Base.concat(extra));
+    graph3.requestDraw(false);
+  }
   const THREE_D = new Set(['surf', 'psurf', 'isurf', 'curve3', 'pt3']);
   const hasPlot = (id) => graph.plots.some((q) => q.id === id) || graph3.plots.some((q) => q.id === id);
 
@@ -490,7 +515,10 @@
           } else {
             rec.kind = 'pt3'; needMissing(allNodes(), []);
             const fs = e.items.map((n) => ME.compile(n, []));
-            plots.push(Object.assign(base(), { kind: 'pt3', get: () => fs.map((q) => q()), size: 3 + item.width * 1.4 }));
+            const plot3 = Object.assign(base(), { kind: 'pt3', get: () => fs.map((q) => q()), size: 3 + item.width * 1.4 });
+            const dragOK3 = e.items.every((n) => n.t === 'num' || (n.t === 'neg' && n.a.t === 'num') || (n.t === 'var' && defined.has(n.n) && varIsSlider(n.n)));
+            if (dragOK3) plot3.drag = (x, y, z) => dragPoint(item, e.items, x, y, z);
+            plots.push(plot3);
           }
           return;
         }
@@ -551,7 +579,18 @@
       const Y = yf();
       if (!Array.isArray(Y) || !Y.length) throw new ME.MathError('No data in the left-hand list');
       const res = (p) => { params.forEach((n, i) => { V[n] = p[i]; }); const M = mf(); return Y.map((y, i) => y - (Array.isArray(M) ? M[i] : M)); };
-      const sol = levMar(res, params.map(() => 1));
+      // multi-start least squares: several initial guesses, keep the best fit
+      const yMean = Y.reduce((a, v) => a + v, 0) / Y.length, yScale = Math.max(1e-9, Math.max(...Y.map(Math.abs)));
+      const starts = [1, 0.1, 10, -1, yMean || 1, yScale, 0.5, 2, -0.1].map((v) => params.map(() => v));
+      starts.push(params.map((_, k) => [yScale, 1, 0.1, yMean || 1][k % 4]));
+      let sol = null, bestSse = Infinity;
+      for (const st0 of starts) {
+        let cand; try { cand = levMar(res, st0); } catch (e) { continue; }
+        const rr = res(cand), sse0 = rr.reduce((a, v) => a + v * v, 0);
+        if (Number.isFinite(sse0) && (sol === null || sse0 < bestSse - 1e-12 * (1 + bestSse))) { bestSse = sse0; sol = cand; }
+        if (bestSse < 1e-20) break;
+      }
+      if (!sol) sol = params.map(() => NaN);
       const r = res(sol);
       params.forEach((n, i) => { V[n] = sol[i]; defined.add(n); });
       const ym = Lh.t === 'var' && /^[A-Za-z\u0370-\u03ff]_\{?(\d+)\}?$/.exec(Lh.n);
@@ -560,9 +599,13 @@
       const r2 = sst > 0 ? 1 - sse / sst : NaN;
       rec.kind = 'regression';
       rec.extraHtml = `<div class="val">${params.map((n) => `${esc(n)} = ${fmt(V[n], 6)}`).join(',  ')}</div><div>r² = ${fmt(r2, 5)}${Number.isFinite(sse) ? ` &nbsp; n = ${Y.length}` : ''}</div>`;
-      const cl = JSON.parse(JSON.stringify(Rh));
-      ME.walk(cl, (nd) => { if (nd.t === 'var' && listNames.includes(nd.n)) nd.n = 'x'; });
-      plots.push(Object.assign(base(), { kind: 'fx', f: ME.compile(cl, ['x']), cond: null, range: null }));
+      const rmse = Math.sqrt(sse / Y.length);
+      rec.extraHtml += `<div>RMSE = ${fmt(rmse, 5)}</div>`;
+      if (listNames.length === 1) {
+        const cl = JSON.parse(JSON.stringify(Rh));
+        ME.walk(cl, (nd) => { if (nd.t === 'var' && listNames.includes(nd.n)) nd.n = 'x'; });
+        plots.push(Object.assign(base(), { kind: 'fx', f: ME.compile(cl, ['x']), cond: null, range: null }));
+      } else rec.extraHtml += '<div class="hint3">Several predictor lists: parameters shown, no 2D curve drawn.</div>';
       return;
     }
     if (ops.includes('!=')) throw new ME.MathError('≠ is not supported');
@@ -609,6 +652,11 @@
     }
     // inequality (possibly chained)
     if (ops.some((o) => o === '=')) throw new ME.MathError('Cannot mix = with inequalities');
+    if (P.some((n) => fvOf(n).has('z') && !defined.has('z'))) {
+      rec.kind = 'isurf'; needMissing(allNodes(), ['x', 'y', 'z']);
+      ops.forEach((op, i) => plots.push(Object.assign(base(), { kind: 'isurf', alpha: 0.4, g: ME.compile({ t: 'bin', op: '-', a: P[i], b: P[i + 1] }, ['x', 'y', 'z']) })));
+      return;
+    }
     rec.kind = 'ineq'; needMissing(allNodes(), ['x', 'y']);
     const tests = ops.map((op, i) => ({ op, g: ME.compile({ t: 'bin', op: '-', a: P[i], b: P[i + 1] }, ['x', 'y']) }));
     plots.push(Object.assign(base(), { kind: 'ineq', tests, cond: mkCond(['x', 'y']), fillAlpha: 0.26 }));
@@ -623,13 +671,13 @@
     return null;
   }
 
-  function dragPoint(item, nodes, x, y) {
-    const vals = [x, y];
+  function dragPoint(item, nodes, x, y, z) {
+    const vals = [x, y, z];
     const texts = nodes.map((n, i) => {
       if (n.t === 'var') { const r = findVarRec(n.n); if (r) { setSliderValue(r.item, vals[i], true); } return n.n; }
       return fmt(vals[i], 8);
     });
-    item.text = `(${texts[0]}, ${texts[1]})`;
+    item.text = `(${texts.join(', ')})`;
     const row = rows.get(item.id);
     if (row) row.ed.set(item.text);
     scheduleEval(true);
@@ -1073,7 +1121,7 @@
     saveTimer = setTimeout(() => {
       try {
         const r = graph.range();
-        localStorage.setItem(STORE_KEY, JSON.stringify({ items: state.items, settings: state.settings, colorIdx: state.colorIdx, tableCount: state.tableCount || 0, view: [r.xmin, r.xmax, r.ymin, r.ymax], nextId }));
+        localStorage.setItem(STORE_KEY, JSON.stringify({ items: state.items, settings: state.settings, colorIdx: state.colorIdx, tableCount: state.tableCount || 0, view: [r.xmin, r.xmax, r.ymin, r.ymax], nextId, geo: geo ? geo.toJSON() : null }));
       } catch (e) { /* storage unavailable */ }
     }, 300);
   }
@@ -1089,13 +1137,13 @@
       if (!raw) return false;
       const d = JSON.parse(raw);
       if (!Array.isArray(d.items) || !d.items.length) return false;
-      state = { items: d.items, settings: Object.assign(defaultSettings(), d.settings || {}), colorIdx: d.colorIdx || 0, tableCount: d.tableCount || 0, view: d.view || null };
+      state = { items: d.items, settings: Object.assign(defaultSettings(), d.settings || {}), colorIdx: d.colorIdx || 0, tableCount: d.tableCount || 0, view: d.view || null, geo: d.geo || null };
       nextId = Math.max(d.nextId || 1, ...state.items.map((i) => i.id + 1));
       return true;
     } catch (e) { return false; }
   }
   function shareLink() {
-    const payload = JSON.stringify({ items: state.items, settings: state.settings, colorIdx: state.colorIdx, tableCount: state.tableCount || 0, view: (() => { const r = graph.range(); return [r.xmin, r.xmax, r.ymin, r.ymax]; })() });
+    const payload = JSON.stringify({ geo: geo.toJSON(), items: state.items, settings: state.settings, colorIdx: state.colorIdx, tableCount: state.tableCount || 0, view: (() => { const r = graph.range(); return [r.xmin, r.xmax, r.ymin, r.ymax]; })() });
     const bytes = new TextEncoder().encode(payload);
     let bin = ''; bytes.forEach((b) => { bin += String.fromCharCode(b); });
     const b64 = btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -1202,7 +1250,8 @@
   function applySettings() {
     const S = state.settings;
     document.documentElement.dataset.theme = S.theme;
-    Object.assign(graph.settings, { grid: S.grid, minor: S.minor, numbers: S.numbers, piX: S.piX });
+    const isGeo = S.app === 'geometry';
+    Object.assign(graph.settings, { grid: S.grid, minor: S.minor, numbers: S.numbers && !isGeo, piX: S.piX, axes: !isGeo });
     graph.refreshTheme();
     graph.requestDraw(false);
     Object.assign(graph3.settings, { grid: S.grid, numbers: S.numbers });
@@ -1219,7 +1268,7 @@
     else { const p = graph.plots.find((q) => q.id === graph.selectedId); $('#curvebar').hidden = !(p && p.kind === 'fx'); }
     const b = $('#btn3d'); b.textContent = is3 ? '2D' : '3D'; b.title = is3 ? 'Back to the 2D graph' : 'Switch to the 3D graph'; b.classList.toggle('on', is3);
     if (is3) { graph3.resize(); graph3.requestDraw(false); } else { graph.resize(); graph.requestDraw(false); }
-    updateAllRows(); saveSoon();
+    applyPlane(); updateAllRows(); saveSoon();
   }
 
   const EXAMPLES = [
@@ -1235,10 +1284,13 @@
     ['Tangent & secant lines', ['y=x^3/6-x', { type: 'note', text: 'Click the curve, then switch on Tangent / Secant in the bar at the bottom.' }]],
     ['Domain colouring', [{ __view: [-3, 3, -2.25, 2.25] }, { type: 'note', text: 'Hue = argument of f(z), brightness bands = log |f(z)|. Zeros are where all colours meet.' }, '(z^2-1)/(z^2+1)']],
     ['3D surface', [{ __mode: '3d' }, 'a=1', 'z=a*sin(x)*cos(y)', 'z=x^2/10+y^2/10-4']],
+    ['3D inequality (translucent)', [{ __mode: '3d' }, 'z<4-x^2/4-y^2/4', 'x^2+y^2+z^2<=9']],
     ['3D curve & points', [{ __mode: '3d' }, '(2cos(t), 2sin(t), t/2){-6<=t<=6}', '(0,0,0)', '(2,0,0)']],
     ['3D parametric surface (torus)', [{ __mode: '3d' }, '((3+cos(v))cos(u), (3+cos(v))sin(u), sin(v)){0<=u<=2pi, 0<=v<=2pi}']],
     ['3D implicit surface (sphere)', [{ __mode: '3d' }, 'x^2+y^2+z^2=9']],
     ['Actions & ticker', ['n=0', 'n -> n+1', 'n -> 0', '(n, n^2/10)', { type: 'note', text: 'Press Run, or Ticker to repeat the action automatically. Gear → Ticker interval.' }]],
+    ['Logistic regression', [{ type: 'table', rows: [['-6', '0.04'], ['-4', '0.12'], ['-2', '0.55'], ['-1', '1.2'], ['0', '2.1'], ['1', '3.0'], ['2', '3.9'], ['4', '4.6'], ['6', '4.9'], ['', '']] }, 'y_1 ~ L/(1+e^(-k(x_1-m)))']],
+    ['Bar plot & statistics', ['V=[3,5,2,6,4]', 'barplot(V)', 'mean(V)', 'mode([1,2,2,3])', 'percentile([1...11],0.9)', 'cumsum(V)']],
     ['Histogram / box plot / dot plot', ['L=[2,3,3,4,4,4,5,5,6,8,9]', 'histogram(L,1)', 'boxplot(L)', 'dotplot(L)']],
     ['List comprehension', ['P=[(n, n^2/5) for n=[-5...5]]', 'S=[n^2 for n=[1...6]]', 'total(S)']],
     ['Folders', [{ type: 'folder', text: 'Circle' }, 'x^2+y^2=4', '(0,0)', { type: 'folder', text: 'Parabola' }, 'y=x^2-2', 'y=-x^2+2']],
@@ -1271,7 +1323,9 @@
 
   function buildMainMenu() {
     const m = $('#mainMenu');
-    m.innerHTML = `<div class="lbl">Graph</div>
+    m.innerHTML = `<div class="lbl">Calculator</div>
+      <button data-app="graph">Graphing calculator</button><button data-app="geometry">Geometry</button><button data-app="scientific">Scientific calculator</button><hr>
+      <div class="lbl">Graph</div>
       <button data-m="new">New graph</button><button data-m="open">Open file…</button><button data-m="save">Save to file</button>
       <button data-m="png">Export image (PNG)</button><button data-m="link">Copy share link</button><hr>
       <div class="lbl">Examples</div>${EXAMPLES.map((e, i) => `<button data-ex="${i}">${esc(e[0])}</button>`).join('')}<hr>
@@ -1279,12 +1333,13 @@
     m.onclick = (ev) => {
       const b = ev.target.closest('button'); if (!b) return;
       closePopovers();
+      if (b.dataset.app) { setApp(b.dataset.app); return; }
       if (b.dataset.ex !== undefined) { loadExample(EXAMPLES[+b.dataset.ex][1]); return; }
       switch (b.dataset.m) {
         case 'new': if (confirm('Start a new graph? Unsaved work will be cleared.')) { state.items = [newItem('expr')]; playing.clear(); renderList(); evaluate(); graph.resetView(); commitSoon(); saveSoon(); } break;
         case 'open': $('#fileIn').click(); break;
         case 'save': {
-          const blob = new Blob([JSON.stringify({ app: 'graphical-calculator', version: 1, items: state.items, settings: state.settings, colorIdx: state.colorIdx, tableCount: state.tableCount || 0, nextId }, null, 2)], { type: 'application/json' });
+          const blob = new Blob([JSON.stringify({ app: 'graphical-calculator', version: 1, items: state.items, settings: state.settings, colorIdx: state.colorIdx, tableCount: state.tableCount || 0, nextId, geo: geo.toJSON() }, null, 2)], { type: 'application/json' });
           download(blob, 'graph.json'); toast('Saved graph.json'); break;
         }
         case 'png': activeGraph().exportPNG((blob) => { download(blob, 'graph.png'); toast('Exported graph.png'); }); break;
@@ -1300,7 +1355,7 @@
   function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 1800); }
 
   function showHelp() {
-    const it = newItem('note', { text: 'Syntax cheat-sheet\n• y = x^2, x = y^2, r = 2 sin(3θ)\n• Implicit: x^2 + y^2 = 4   Inequality: y < sin(x), 1 < x < 3\n• Parametric: (cos(t), sin(t)){0<=t<=2π}\n• Points: (1, 2) — drag them!\n• Functions: f(x) = x^2, then f(3) or f\'(x)\n• Sliders: type a new letter (a x) and click “add slider”\n• Restrict a domain: y = x^2 {x > 0}   Piecewise: y = {x<0: -x, x}\n• Lists: L=[1...10], [2,4...20], L^2, L[3], L[L>5], (L, L^2)\n• Stats: mean, median, total, stdev, variance, quartile, corr, cov, sort, join, unique, count\n• Tables make lists x_1, y_1 — fit with  y_1 ~ m x_1 + b  (any model, e.g. a*e^(b x_1))\n• sum(n,1,10,n^2)   int(0,1,x^2)   abs, sqrt, ln, log, nCr, floor …\n• Folders: + → Folder, then drag rows (grip = the number column) to reorder or move into folders\n• random(), random(5), shuffle(L), normpdf/normcdf/invnorm, binompdf/binomcdf, poissonpdf/poissoncdf\n• Residuals after a regression: e_1 → (x_1, e_1)\n• 3D: z = sin(x)cos(y)  ·  (cos t, sin t, t/3)  ·  (x(u,v), y(u,v), z(u,v))  ·  x^2+y^2+z^2=9  ·  (1,2,3)   — drag to rotate, wheel to zoom\n• Domain colouring: type a function of z alone, e.g. (z^2-1)/(z^2+1) or sin(z)\n• Actions: n → n+1 (Run button or Ticker); several with commas: n → n+1, m → 0\n• Stats plots: histogram(L,1), boxplot(L), dotplot(L)   ·   List comprehension: [n^2 for n=[1...5]]\n• Complex numbers: i, 3+4i, abs(z), arg(z), conj(z), e^(i*pi); a complex value plots as a point\n• Click a curve for tangent & secant lines (bar at the bottom), zeros, extrema & intersections' });
+    const it = newItem('note', { text: 'Syntax cheat-sheet\n• y = x^2, x = y^2, r = 2 sin(3θ)\n• Implicit: x^2 + y^2 = 4   Inequality: y < sin(x), 1 < x < 3\n• Parametric: (cos(t), sin(t)){0<=t<=2π}\n• Points: (1, 2) — drag them!\n• Functions: f(x) = x^2, then f(3) or f\'(x)\n• Sliders: type a new letter (a x) and click “add slider”\n• Restrict a domain: y = x^2 {x > 0}   Piecewise: y = {x<0: -x, x}\n• Lists: L=[1...10], [2,4...20], L^2, L[3], L[L>5], (L, L^2)\n• Stats: mean, median, total, stdev, variance, quartile, corr, cov, sort, join, unique, count\n• Tables make lists x_1, y_1 — fit with  y_1 ~ m x_1 + b  (any model, e.g. a*e^(b x_1))\n• sum(n,1,10,n^2)   int(0,1,x^2)   abs, sqrt, ln, log, nCr, floor …\n• Folders: + → Folder, then drag rows (grip = the number column) to reorder or move into folders\n• random(), random(5), shuffle(L), normpdf/normcdf/invnorm, binompdf/binomcdf, poissonpdf/poissoncdf\n• Residuals after a regression: e_1 → (x_1, e_1)\n• 3D: z = sin(x)cos(y)  ·  (cos t, sin t, t/3)  ·  (x(u,v), y(u,v), z(u,v))  ·  x^2+y^2+z^2=9  ·  (1,2,3)   — drag to rotate, wheel to zoom\n• Domain colouring: type a function of z alone, e.g. (z^2-1)/(z^2+1) or sin(z)\n• Actions: n → n+1 (Run button or Ticker); several with commas: n → n+1, m → 0\n• Stats plots: histogram(L,1), boxplot(L), dotplot(L)   ·   List comprehension: [n^2 for n=[1...5]]\n• Modes (☰ menu): Graphing · Geometry (points, lines, circles, perpendicular/parallel, intersections, polygons, angles, distances) · Scientific calculator\n• 3D: click a surface to place a tangent plane; inequalities like z<4-x^2-y^2 are drawn translucent; drag 3D points (Shift = up/down)\n• Regression fits any model with several restarts: y_1 ~ L/(1+e^(-k(x_1-m)))\n• Complex numbers: i, 3+4i, abs(z), arg(z), conj(z), e^(i*pi); a complex value plots as a point\n• Click a curve for tangent & secant lines (bar at the bottom), zeros, extrema & intersections' });
     state.items.unshift(it); $('#list').insertBefore(createRow(it), $('#list').firstChild); evaluate(); commitSoon(); saveSoon();
     $('#list').scrollTop = 0;
   }
@@ -1387,6 +1442,48 @@
     list.addEventListener('dragend', () => { dragId = null; clear(); });
   }
 
+  /* ================= calculator modes ================= */
+  function buildGeoBar() {
+    const bar = $('#geobar');
+    bar.innerHTML = GEO_TOOLS.map((t) => `<button class="gt" data-tool="${t.id}" title="${t.label}: ${t.hint}"><span class="gi">${t.icon}</span><span class="gl">${t.label}</span></button>`).join('')
+      + '<span class="gsep"></span><button class="gt" data-act="undo" title="Undo"><span class="gi">↶</span><span class="gl">Undo</span></button><button class="gt" data-act="clear" title="Clear all"><span class="gi">🗑</span><span class="gl">Clear</span></button><button class="gt" data-act="grid" title="Toggle grid"><span class="gi">▦</span><span class="gl">Grid</span></button><div id="geohint"></div>';
+    bar.onclick = (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      if (b.dataset.tool) geo.setTool(b.dataset.tool);
+      else if (b.dataset.act === 'undo') geo.undo();
+      else if (b.dataset.act === 'clear') { if (!geo.objects.length || confirm('Remove all geometry objects?')) geo.clear(); }
+      else if (b.dataset.act === 'grid') { state.settings.grid = !state.settings.grid; state.settings.minor = state.settings.grid; applySettings(); saveSoon(); }
+    };
+  }
+  function geoToolChanged(tool, status) {
+    $('#geobar').querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === tool));
+    const h = $('#geohint'); if (h) h.textContent = status || '';
+  }
+  function setApp(name) {
+    const S = state.settings;
+    if (name === 'scientific') { ME.R.deg = false; sci.open(); return; }
+    if (name === S.app) return;
+    const body = document.body;
+    if (name === 'geometry') {
+      S.app = 'geometry'; body.classList.add('app-geo');
+      if (S.mode === '3d') setMode('2d');
+      graph.cb.onPointer = (t, x, y, e) => geo.pointer(t, x, y, e);
+      $('#geobar').hidden = false; $('#curvebar').hidden = true; $('#surfbar').hidden = true;
+      geo.setTool('move');
+      graph.setPlots([geo.plot]);
+      applySettings();
+      setTimeout(() => { graph.resize(); graph.requestDraw(false); }, 30);
+    } else {
+      S.app = 'graph'; body.classList.remove('app-geo');
+      graph.cb.onPointer = null; graph.over.style.cursor = '';
+      $('#geobar').hidden = true;
+      applySettings();
+      evaluate();
+      setTimeout(() => { graph.resize(); graph.requestDraw(false); }, 30);
+    }
+    saveSoon();
+  }
+
   /* ================= init ================= */
   function init() {
     // icons
@@ -1418,12 +1515,16 @@
       },
     });
     graph3 = new Graph3D($('#graph3Host'));
+    geo = new Geo(graph, { onChange: () => saveSoon(), onTool: (t, st) => geoToolChanged(t, st), toast });
+    if (state.geo) geo.load(state.geo);
+    sci = new Sci($('#sci'), ME); sci.onClose = () => { ME.R.deg = !!state.settings.deg; };
     graph.resize();
     if (state.view && state.view.length === 4 && state.view.every(Number.isFinite)) graph.setRange(state.view[0], state.view[1], state.view[2], state.view[3]);
     else graph.resetView();
     applySettings();
     setMode(state.settings.mode === '3d' ? '3d' : '2d');
-    buildMainMenu(); buildKeypad();
+    buildMainMenu(); buildKeypad(); buildGeoBar();
+    if (state.settings.app === 'geometry') { state.settings.app = 'graph'; setApp('geometry'); }
     renderList();
     evaluate();
     hist = [snapshot()]; hIdx = 0; updateUndo();
@@ -1450,6 +1551,7 @@
           if (!Array.isArray(d.items)) throw new Error('bad file');
           state.items = d.items; state.colorIdx = d.colorIdx || 0; state.tableCount = d.tableCount || 0;
           if (d.settings) Object.assign(state.settings, d.settings);
+          if (d.geo) geo.load(d.geo);
           nextId = Math.max(1, ...state.items.map((i) => i.id + 1));
           playing.clear(); applySettings(); renderList(); evaluate(); commitSoon(); saveSoon(); toast('Graph loaded');
         } catch (err) { toast('Could not read that file'); }
@@ -1457,6 +1559,23 @@
       rd.readAsText(f); e.target.value = '';
     };
 
+    // tangent plane bar (3D)
+    const spA = $('#spA'), spB = $('#spB'), spOn = $('#spOn');
+    const readPlane = () => { plane.on = spOn.checked; const a = parseFloat(spA.value), b = parseFloat(spB.value); if (Number.isFinite(a)) plane.a = a; if (Number.isFinite(b)) plane.b = b; applyPlane(); };
+    spOn.onchange = readPlane; spA.oninput = readPlane; spB.oninput = readPlane;
+    graph3.onPick = (hit) => {
+      if (!hit) return;
+      const r = (v) => parseFloat(v.toPrecision(4));
+      plane.id = hit.plot.id; plane.on = true; plane.a = r(hit.x); plane.b = r(hit.y);
+      spOn.checked = true; spA.value = plane.a; spB.value = plane.b; applyPlane();
+    };
+    $('#spAdd').onclick = () => {
+      if (!plane.info) { toast('Turn on Tangent plane first (or click the surface)'); return; }
+      const i = plane.info, num = (v) => fmt(v, 6);
+      const last = state.items[state.items.length - 1];
+      addItem('expr', last && last.id, `z=${num(i.fx)}x${i.fy < 0 ? '-' : '+'}${num(Math.abs(i.fy))}y${i.c < 0 ? '-' : '+'}${num(Math.abs(i.c))}`);
+      toast('Plane added to the list');
+    };
     // tangent / secant bar
     const syncTools = () => { graph.tools.tangent = $('#tTan').checked; graph.tools.secant = $('#tSec').checked; $('#secCtl').hidden = !graph.tools.secant; graph.drawOverlay(); };
     $('#tTan').onchange = syncTools; $('#tSec').onchange = syncTools;
@@ -1494,7 +1613,7 @@
     setupDnD();
     window.addEventListener('resize', () => graph.resize());
     if (innerWidth < 720) $('#btnKeypad').textContent = '⌨';
-    window.__gc = { state: () => state, recs, graph, evaluate, rows, setText: (i, t) => { const it = state.items[i]; it.text = t; const r = rows.get(it.id); r.ed.set(t); evaluate(); } };
+    window.__gc = { state: () => state, recs, graph, graph3, geo: () => geo, plane, evaluate, rows, setText: (i, t) => { const it = state.items[i]; it.text = t; const r = rows.get(it.id); r.ed.set(t); evaluate(); } };
   }
 
   async function boot() {

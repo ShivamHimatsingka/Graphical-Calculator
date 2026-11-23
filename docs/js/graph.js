@@ -178,6 +178,7 @@
             case 'table': this.drawTable(ctx, p); break;
             case 'points': this.drawPoints(ctx, p); break;
             case 'stat': this.drawStat(ctx, p); break;
+            case 'custom': p.draw(ctx, this); break;
             default: break;
           }
         } catch (e) { /* ignore per-plot failures */ }
@@ -234,6 +235,7 @@
       }
       // axes
       const ax = this.X(0), ay = this.Y(0);
+      if (S.axes === false) { ctx.restore(); return; }
       ctx.strokeStyle = T.axis; ctx.lineWidth = 1.4;
       ctx.beginPath();
       if (ay >= -1 && ay <= h + 1) { ctx.moveTo(0, Math.round(ay) + 0.5); ctx.lineTo(w, Math.round(ay) + 0.5); }
@@ -458,7 +460,7 @@
     drawStat(ctx, p) {
       let m; try { m = p.get(); } catch (e) { return; }
       if (!m || !m.__plot) return;
-      const data = m.data.filter(Number.isFinite).sort((a, b) => a - b);
+      const data = m.__plot === 'bar' ? m.data.slice() : m.data.filter(Number.isFinite).sort((a, b) => a - b);
       const n = data.length; if (!n) return;
       const col = p.color;
       ctx.save();
@@ -476,6 +478,14 @@
           const x0 = this.X(start + k * w), x1 = this.X(start + (k + 1) * w), y0 = this.Y(0), y1 = this.Y(c);
           ctx.globalAlpha = 0.35; ctx.fillRect(x0, y1, x1 - x0, y0 - y1);
           ctx.globalAlpha = 1; ctx.strokeRect(x0, y1, x1 - x0, y0 - y1);
+        });
+      } else if (m.__plot === 'bar') {
+        const w = m.w || 0.8;
+        m.data.forEach((v, k) => {
+          if (!Number.isFinite(v)) return;
+          const x0 = this.X(k + 1 - w / 2), x1 = this.X(k + 1 + w / 2), y0 = this.Y(0), y1 = this.Y(v);
+          ctx.globalAlpha = 0.35; ctx.fillRect(x0, Math.min(y0, y1), x1 - x0, Math.abs(y0 - y1));
+          ctx.globalAlpha = 1; ctx.strokeRect(x0, Math.min(y0, y1), x1 - x0, Math.abs(y0 - y1));
         });
       } else if (m.__plot === 'box') {
         const q = (f) => { const pos = f * (n - 1), a = Math.floor(pos), b = Math.ceil(pos); return data[a] + (data[b] - data[a]) * (pos - a); };
@@ -866,6 +876,7 @@
           mode = 'pinch'; return;
         }
         start = [mx, my]; last = [mx, my]; moved = 0;
+        if (this.cb.onPointer && this.cb.onPointer('down', this.invX(mx), this.invY(my), e)) { mode = 'ext'; return; }
         const pt = this.hitPoint(mx, my);
         if (pt && pt.drag) { mode = 'dragpoint'; this._dragPlot = pt; this.hoverPoint = null; return; }
         const sel = this.selectedPlot();
@@ -896,6 +907,7 @@
         if (this.cb.onCursor) this.cb.onCursor(this.invX(mx), this.invY(my), true);
         if (!mode) { this._hover(mx, my); return; }
         moved = Math.max(moved, Math.hypot(mx - start[0], my - start[1]));
+        if (mode === 'ext') { this.cb.onPointer('move', this.invX(mx), this.invY(my), e); last = [mx, my]; return; }
         if (mode === 'pan') {
           if (moved < 2) return;
           this.view.x0 -= (mx - last[0]) / this.view.sx;
@@ -928,6 +940,8 @@
         ptrs.delete(e.pointerId);
         if (mode === 'pinch') { if (ptrs.size < 2) { mode = null; pinch = null; } return; }
         const wasClick = moved < 4;
+        if (mode === 'ext') { if (this.cb.onPointer) this.cb.onPointer('up', this.invX(mx), this.invY(my), e); mode = null; c.style.cursor = ''; return; }
+        if (wasClick && mode === 'pan' && this.cb.onPointer && this.cb.onPointer('click', this.invX(mx), this.invY(my), e)) { mode = null; c.style.cursor = ''; return; }
         if (wasClick && (mode === 'pan' || mode === 'axisx' || mode === 'axisy' || mode === 'trace')) {
           const h = this.hitCurve(mx, my);
           if (h) {
@@ -970,6 +984,7 @@
 
     _hover(mx, my) {
       const c = this.over;
+      if (this.cb.onPointer) { this.cb.onPointer('hover', this.invX(mx), this.invY(my)); return; }
       const poi = this.hitPOI(mx, my);
       const pt = this.hitPoint(mx, my);
       let cur = '';

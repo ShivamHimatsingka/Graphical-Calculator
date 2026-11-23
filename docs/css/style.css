@@ -169,12 +169,12 @@ code { background: var(--gutter); padding: 0 4px; border-radius: 3px; }
 .row.drop-after { box-shadow: inset 0 -3px 0 var(--accent); }
 
 /* tangent / secant bar */
-#curvebar { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 6; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; box-shadow: var(--shadow); display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; max-width: calc(100% - 24px); font-size: 13px; }
-#curvebar[hidden] { display: none; }
-#curvebar label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
-#curvebar input[type=number] { width: 64px; padding: 2px 4px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--text); }
-#toolInfo { flex-basis: 100%; white-space: pre-line; font: 12.5px ui-monospace, Menlo, Consolas, monospace; color: var(--text); }
-#toolInfo:empty { display: none; }
+#curvebar, #surfbar { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 6; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; box-shadow: var(--shadow); display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; max-width: calc(100% - 24px); font-size: 13px; }
+#curvebar[hidden], #surfbar[hidden] { display: none; }
+#curvebar label, #surfbar label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+#curvebar input[type=number], #surfbar input[type=number] { width: 64px; padding: 2px 4px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--text); }
+#toolInfo, #spInfo { flex-basis: 100%; white-space: pre-line; font: 12.5px ui-monospace, Menlo, Consolas, monospace; color: var(--text); }
+#toolInfo:empty, #spInfo:empty { display: none; }
 
 /* live formula editor (MathLive) */
 .field.math { min-height: 36px; }
@@ -204,3 +204,38 @@ math-field.in:focus-within { outline: none; }
 .hint3 { font-size: 12px; color: var(--muted); font-style: italic; }
 .chip[data-run], .chip[data-tick] { border-color: #388c46; color: #388c46; }
 .chip[data-run]:hover, .chip[data-tick]:hover { background: #388c46; color: #fff; }
+
+.sphint { flex-basis: 100%; font-size: 11.5px; color: var(--muted); }
+
+/* geometry mode */
+body.app-geo #side, body.app-geo #split, body.app-geo #btnExpand, body.app-geo #btn3d { display: none !important; }
+#geobar { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); z-index: 6; display: flex; flex-wrap: wrap; justify-content: center; gap: 2px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 5px 6px; box-shadow: var(--shadow); max-width: calc(100% - 70px); }
+#geobar[hidden] { display: none; }
+#geobar .gt { border: 0; background: transparent; border-radius: 8px; padding: 3px 7px; display: flex; flex-direction: column; align-items: center; min-width: 46px; color: var(--text); }
+#geobar .gt:hover { background: var(--hover); }
+#geobar .gt.on { background: var(--accent); color: #fff; }
+#geobar .gi { font-size: 18px; line-height: 1.2; }
+#geobar .gl { font-size: 10.5px; opacity: .85; }
+#geobar .gsep { width: 1px; background: var(--line); margin: 3px 4px; }
+#geohint { flex-basis: 100%; text-align: center; font-size: 12px; color: var(--muted); padding: 2px 4px; }
+#geohint:empty { display: none; }
+/* scientific calculator */
+#sci { position: fixed; inset: 0; z-index: 80; background: color-mix(in srgb, var(--bg) 92%, transparent); display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
+#sci[hidden] { display: none; }
+.sci-card { width: min(440px, 100vw); max-height: 100vh; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; }
+.sci-head { display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 16px; border-bottom: 1px solid var(--line); }
+.sci-flags { margin-left: auto; font-size: 12px; font-weight: 700; color: var(--accent); display: flex; gap: 8px; }
+.sci-hist { height: 150px; overflow-y: auto; padding: 8px 16px; font: 15px "Cambria Math", "Times New Roman", serif; }
+.sh { display: flex; flex-direction: column; align-items: flex-end; margin-bottom: 6px; }
+.se { color: var(--muted); cursor: pointer; } .sr { font-size: 19px; cursor: pointer; }
+.sci-in { border: 0; border-top: 1px solid var(--line); outline: 0; background: transparent; color: var(--text); font: 26px "Cambria Math", "Times New Roman", serif; text-align: right; padding: 10px 16px 0; }
+.sci-prev { min-height: 26px; text-align: right; padding: 0 16px 6px; color: var(--muted); font: 17px "Cambria Math", "Times New Roman", serif; }
+.sci-keys { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; padding: 10px; background: var(--gutter); }
+.sk { height: 46px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); font: 600 16px -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--text); padding: 0; }
+.sk:hover { background: var(--hover); }
+.sk:active { transform: translateY(1px); }
+.sk.fn { font-weight: 500; background: var(--gutter); } .sk.op { color: var(--accent); }
+.sk.mem { font-size: 14px; color: #388c46; } .sk.danger { color: var(--err); }
+.sk.eq { background: var(--accent); color: #fff; border-color: var(--accent); }
+.sk.on { background: var(--accent); color: #fff; }
+@media (max-width: 460px) { .sk { height: 42px; font-size: 15px; } }

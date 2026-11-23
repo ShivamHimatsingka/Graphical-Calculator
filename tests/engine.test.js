@@ -80,6 +80,10 @@ function cxFn(src, re, im, arg) {
 }
 cxFn('z^2-1', -2, 0, new ME.Cx(0, 1)); cxFn('1/(z^2+1)', 0.2, 0, new ME.Cx(2, 0)); cxFn('conj(z)', 1, -2, new ME.Cx(1, 2)); cxFn('z*i', -2, 1, new ME.Cx(1, 2));
 
+// more statistics helpers
+check('mode([1,2,2,3])', 2); check('percentile([1...11],0.9)', 10); check('cumsum([1,2,3])', [1, 3, 6]); check('diff([1,4,9])', [3, 5]); check('reverse([1,2,3])', [3, 2, 1]);
+{ const b = value('barplot([3,5,2],0.5)'); if (b && b.__plot === 'bar' && b.data.length === 3 && b.w === 0.5) pass++; else fails.push('barplot marker'); }
+
 // parser errors
 for (const bad of ['2+', '(1', 'sin(', '1 $ 2']) {
   try { ME.parseStatement(bad, []); fails.push(`"${bad}" should not parse`); } catch (e) { pass++; }

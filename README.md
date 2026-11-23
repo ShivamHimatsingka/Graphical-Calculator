@@ -14,6 +14,9 @@
   <img src="assets/web-3d.jpg" width="445" alt="3D surfaces">
   <img src="assets/web-domain-colouring.jpg" width="445" alt="Complex domain colouring of (z^2-1)/(z^2+1)">
 </p>
+<p align="center">
+  <img src="assets/web-geometry.jpg" width="445" alt="Geometry mode: triangle with angle and distance measurements and a circle">
+</p>
 
 This repository contains two editions:
 
@@ -26,6 +29,12 @@ This repository contains two editions:
 
 ## ✨ Web features
 
+**Three calculators in one** (☰ menu → *Calculator*)
+
+* **Graphing** — everything below
+* **Geometry** — dynamic constructions: points, segments, lines, rays, circles, midpoints, perpendicular & parallel lines, intersections, polygons, angle and distance measurements; drag any free point and everything built on it follows; undo, delete (with dependants)
+* **Scientific** — a full-screen scientific calculator: sin/cos/tan & inverses (2nd), logs, powers, roots, factorial, %, EXP, ANS, memory (MC/MR/M+/M−), DEG/RAD, complex and list results, history
+
 **Graph anything**
 
 * Functions `y = f(x)` and `x = f(y)`
@@ -33,7 +42,7 @@ This repository contains two editions:
 * Implicit curves, e.g. `x^2 + y^2 = 25`
 * Inequalities with shading, including chains: `y < x^2`, `1 < x < 3`
 * **Complex domain colouring**: type a function of `z` alone — `(z^2-1)/(z^2+1)`, `sin(z)`, `z^3-1` — and the plane is coloured by phase and magnitude
-* **3D graphs** (press the **3D** button): surfaces `z = f(x,y)`, parametric curves `(x(t), y(t), z(t))`, parametric surfaces `(x(u,v), y(u,v), z(u,v))`, implicit surfaces `x^2+y^2+z^2=9`, 3D points; drag to rotate, wheel/pinch to zoom, adjustable box, auto-rotate
+* **3D graphs** (press the **3D** button): surfaces `z = f(x,y)`, parametric curves `(x(t), y(t), z(t))`, parametric surfaces `(x(u,v), y(u,v), z(u,v))`, implicit surfaces `x^2+y^2+z^2=9`, 3D inequalities (translucent) `z<4-x^2-y^2`, 3D points you can drag (Shift = up/down); **tangent planes** (click a surface); drag to rotate, wheel/pinch to zoom, adjustable box, auto-rotate
 * Points (drag them!) with optional labels, point lists, multi-column tables
 * Piecewise functions `{x<0: -x, x^2}` and domain restrictions `y = x^2 {x > 0}`
 
@@ -65,13 +74,13 @@ This repository contains two editions:
 * Lists `[1,2,3]`, ranges `[1...10]` / `[2,4...20]`, indexing `L[3]`, slicing `L[2...4]`, filtering `L[L>5]`
 * Everything broadcasts: `L^2`, `sin(L)`, `f(L)`, `(L, L^2)`, and `y = L sin(x)` draws one curve per item
 * `total mean median min max count stdev stdevp variance varp mad quartile corr cov sort unique join shuffle random`
-* Statistics plots: `histogram(L, w)`, `boxplot(L)`, `dotplot(L)`
+* Statistics plots: `histogram(L, w)`, `boxplot(L)`, `dotplot(L)`, `barplot(L)`; also `mode`, `percentile`, `cumsum`, `diff`, `reverse`, `skewness`
 * Distributions: `normpdf normcdf invnorm binompdf binomcdf poissonpdf poissoncdf exppdf expcdf unifpdf unifcdf`
 
 **Tables & regression**
 
 * Tables expose lists `x_1`, `y_1`, … ; add more columns (`+ column`) and rename them to use as lists
-* Least-squares regression with **any model**: `y_1 ~ m x_1 + b`, `y_1 ~ a x_1^2 + b x_1 + c`, `y_1 ~ a*e^(b x_1)` — shows parameters, r² and residuals `e_1`
+* Least-squares regression with **any model** (several restarts, so logistic / exponential fits converge), including several predictor lists, with RMSE: `y_1 ~ m x_1 + b`, `y_1 ~ a x_1^2 + b x_1 + c`, `y_1 ~ a*e^(b x_1)` — shows parameters, r² and residuals `e_1`
 
 **Exploring the graph**
 
@@ -152,12 +161,14 @@ Graphical-Calculator/
 │       ├── mathengine.js    #   tokenizer, parser, list/stat runtime, code generator
 │       ├── latex.js         #   LaTeX <-> text converters for the live formula editor
 │       ├── graph.js         #   2D canvas renderer & interaction (marching squares, POIs, tracing, tangents, domain colouring)
-│       ├── graph3d.js       #   3D renderer (projection, shaded meshes, marching tetrahedra)
+│       ├── graph3d.js       #   3D renderer (projection, shaded meshes, marching tetrahedra, picking & dragging)
+│       ├── geometry.js      #   geometry mode: constructions, intersections, measurements
+│       ├── scientific.js    #   scientific calculator overlay
 │       └── app.js           #   UI, evaluation pipeline, sliders, tables, folders, regression
 ├── desktop/                 # 🖥️ Python/PySide6 edition
 │   ├── main.py
 │   └── requirements.txt
-├── tests/                   # engine + LaTeX converter tests
+├── tests/                   # engine, LaTeX converter and geometry tests
 ├── assets/                  # README images
 ├── package.json             # `npm start` / `npm test` helpers
 ├── LICENSE
@@ -190,9 +201,12 @@ Graphical-Calculator/
 - [x] Actions / ticker
 - [x] 3D graphs (surfaces, curves, parametric & implicit surfaces, points)
 - [x] Histograms, box plots, dot plots; list comprehensions; multi-column tables
-- [ ] 3D inequalities, 3D tangent planes, and 3D point dragging
-- [ ] Geometry / scientific calculator modes
-- [ ] More statistics plots (bar plots, scatter matrices) and further regression families
+- [x] 3D inequalities, tangent planes and draggable 3D points
+- [x] Geometry and scientific calculator modes
+- [x] Bar plots, more statistics functions, robust multi-start regression
+- [ ] Geometry: transformations (reflect / rotate / dilate), conics, angle bisectors, polygon area
+- [ ] 3D: tangent planes for parametric/implicit surfaces, volume shading
+- [x] Geometry constructions are saved in autosave, JSON files and share links
 
 ---
 
