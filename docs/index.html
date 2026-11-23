@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Graphical Calculator</title>
+<meta name="description" content="A Desmos-style graphing calculator that runs entirely in your browser.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232d70b3'/%3E%3Cpath d='M4 24 C10 24 10 8 16 8 S22 24 28 24' stroke='white' stroke-width='3' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+  <aside id="side">
+    <header class="top">
+      <div class="menuwrap">
+        <button id="btnAdd" class="pill" title="Add item"><span class="plus">+</span><span class="caret">▾</span></button>
+        <div id="addMenu" class="menu" hidden>
+          <button data-add="expr">Expression</button>
+          <button data-add="note">Note</button>
+          <button data-add="table">Table</button>
+        </div>
+      </div>
+      <button id="btnUndo" class="ib" title="Undo (Ctrl/⌘+Z)" aria-label="Undo"></button>
+      <button id="btnRedo" class="ib" title="Redo (Ctrl/⌘+Shift+Z)" aria-label="Redo"></button>
+      <div class="grow"></div>
+      <div class="menuwrap">
+        <button id="btnMenu" class="ib" title="Menu" aria-label="Menu"></button>
+        <div id="mainMenu" class="menu right" hidden></div>
+      </div>
+      <button id="btnCollapse" class="ib" title="Hide expression list" aria-label="Hide list"></button>
+    </header>
+    <div id="list" role="list"></div>
+    <div id="keypad" hidden></div>
+    <footer class="bottom">
+      <button id="btnKeypad" class="ghost" title="Toggle keypad">⌨ Keypad</button>
+      <span class="hint">Tip: type <code>y=a*x^2</code> and click “add slider”</span>
+    </footer>
+  </aside>
+  <div id="split" title="Drag to resize"></div>
+  <main id="stage">
+    <div id="graphHost"></div>
+    <div id="tip"></div>
+    <div id="coords"></div>
+    <button id="btnExpand" class="ib float" title="Show expression list" aria-label="Show list" hidden></button>
+    <div class="gctrl">
+      <button id="btnSettings" class="ib" title="Graph settings" aria-label="Graph settings"></button>
+      <button id="btnHome" class="ib" title="Reset view" aria-label="Reset view"></button>
+      <button id="btnZoomIn" class="ib" title="Zoom in" aria-label="Zoom in">+</button>
+      <button id="btnZoomOut" class="ib" title="Zoom out" aria-label="Zoom out">−</button>
+    </div>
+  </main>
+</div>
+<div id="pop" class="popover" hidden></div>
+<div id="gset" class="popover" hidden></div>
+<div id="toast" role="status"></div>
+<input type="file" id="fileIn" accept=".json,application/json" hidden>
+<script src="js/mathengine.js"></script>
+<script src="js/graph.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

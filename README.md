@@ -29,6 +29,20 @@ A desktop graphing calculator designed for fast mathematical exploration, with i
 
 ---
 
+## 🌐 Web version (Desmos-style, no install)
+
+A zero-dependency browser version lives in [`docs/`](docs/). Open `docs/index.html` directly, or serve it:
+
+```bash
+cd docs && python3 -m http.server 8000   # then visit http://localhost:8000
+```
+
+To host it free on **GitHub Pages**: *Settings → Pages → Deploy from branch → `main` / `/docs`*.
+
+**Web features:** functions `y=f(x)`, `x=f(y)`, polar `r=f(θ)`, parametric `(x(t), y(t))`, implicit curves (`x^2+y^2=25`), inequalities & shading (`y<x^2`, `1<x<3`), points (draggable), tables, user functions `f(x)=…` with derivatives `f'(x)`, `sum` / `prod` / `int`, piecewise `{x<0: -x, x}` and domain restrictions `{0<=t<=2π}`, auto-created sliders with play/animate, zeros / extrema / intersection points when you click a curve, trace, zoom / pan / pinch / axis-drag scaling, radians/degrees, π axis labels, light/dark theme, undo/redo, on-screen keypad, save/open JSON, PNG export, share links and autosave.
+
+---
+
 ## 🖥️ Preview
 
 <p align="center">
