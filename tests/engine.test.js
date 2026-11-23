@@ -63,6 +63,23 @@ cx('i^2', -1, 0); cx('3+4i', 3, 4); cx('(3+4i)(1-2i)', 11, -2); cx('(1+i)^2', 0,
 cx('e^(i pi)', -1, 0); cx('sin(i)', 0, Math.sinh(1)); cx('sum(n,1,4,i^n)', 0, 0); cx('sum(i,1,4,i)', 10, 0);
 check('abs(3+4i)', 5); check('real(3+4i)', 3); check('imag(3+4i)', 4); check('arg(i)', Math.PI / 2);
 
+// list comprehension
+check('[n^2 for n=[1...5]]', [1, 4, 9, 16, 25]); check('total([2k for k=[1,2,3]])', 12); check('[a+1 for a=[1...3]][2]', 3);
+// statistics plot markers
+{
+  const h = value('histogram([1,2,2,3],1)'), b = value('boxplot([1,2,3,4,5])');
+  if (h && h.__plot === 'hist' && h.data.length === 4 && h.w === 1 && b && b.__plot === 'box') pass++; else fails.push('histogram/boxplot markers');
+}
+// complex-valued function parameters (used for domain colouring)
+function cxFn(src, re, im, arg) {
+  for (const k of Object.keys(ME.V)) delete ME.V[k];
+  const st = ME.parseStatement(src, []);
+  const out = ME.compile(ME.resolve(st.parts[0], new Set()), ['z'], { complex: ['z'] })(arg);
+  const c = typeof out === 'number' ? { re: out, im: 0 } : out;
+  if (c && near(c.re, re) && Math.abs(c.im - im) < 1e-9) pass++; else fails.push(`${src} @ ${JSON.stringify(arg)} expected ${re}+${im}i got ${JSON.stringify(out)}`);
+}
+cxFn('z^2-1', -2, 0, new ME.Cx(0, 1)); cxFn('1/(z^2+1)', 0.2, 0, new ME.Cx(2, 0)); cxFn('conj(z)', 1, -2, new ME.Cx(1, 2)); cxFn('z*i', -2, 1, new ME.Cx(1, 2));
+
 // parser errors
 for (const bad of ['2+', '(1', 'sin(', '1 $ 2']) {
   try { ME.parseStatement(bad, []); fails.push(`"${bad}" should not parse`); } catch (e) { pass++; }

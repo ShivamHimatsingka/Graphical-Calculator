@@ -10,6 +10,11 @@
   <img src="assets/web-screenshot.jpg" width="900" alt="Web graphing calculator with typeset formulas, a slider-driven sine wave, a polar rose, a shaded inequality, a complex point and tangent/secant lines">
 </p>
 
+<p align="center">
+  <img src="assets/web-3d.jpg" width="445" alt="3D surfaces">
+  <img src="assets/web-domain-colouring.jpg" width="445" alt="Complex domain colouring of (z^2-1)/(z^2+1)">
+</p>
+
 This repository contains two editions:
 
 | Edition | Where | Stack | Best for |
@@ -27,7 +32,9 @@ This repository contains two editions:
 * Polar `r = f(θ)` and parametric `(x(t), y(t))`
 * Implicit curves, e.g. `x^2 + y^2 = 25`
 * Inequalities with shading, including chains: `y < x^2`, `1 < x < 3`
-* Points (drag them!), point lists, tables
+* **Complex domain colouring**: type a function of `z` alone — `(z^2-1)/(z^2+1)`, `sin(z)`, `z^3-1` — and the plane is coloured by phase and magnitude
+* **3D graphs** (press the **3D** button): surfaces `z = f(x,y)`, parametric curves `(x(t), y(t), z(t))`, parametric surfaces `(x(u,v), y(u,v), z(u,v))`, implicit surfaces `x^2+y^2+z^2=9`, 3D points; drag to rotate, wheel/pinch to zoom, adjustable box, auto-rotate
+* Points (drag them!) with optional labels, point lists, multi-column tables
 * Piecewise functions `{x<0: -x, x^2}` and domain restrictions `y = x^2 {x > 0}`
 
 **Live formula editor**
@@ -45,18 +52,25 @@ This repository contains two editions:
 **Sliders**
 
 * Use any new letter and click **add slider** — adjustable range, step, speed, **play/animate**
-* Two-way sync between the text (`a=2.5`) and the slider
+* Two-way sync between the text (`a=2.5`) and the slider; play modes: loop, bounce, once
+
+**Actions & ticker**
+
+* `n -> n+1` (or `n → n+1`) makes a **Run** button; several at once with commas: `a -> a+1, b -> 0`. All right-hand sides are evaluated first, like Desmos
+* **Ticker** repeats the action automatically (interval in the ⚙ menu)
 
 **Lists & statistics**
 
+* List comprehensions `[n^2 for n=[1...5]]`
 * Lists `[1,2,3]`, ranges `[1...10]` / `[2,4...20]`, indexing `L[3]`, slicing `L[2...4]`, filtering `L[L>5]`
 * Everything broadcasts: `L^2`, `sin(L)`, `f(L)`, `(L, L^2)`, and `y = L sin(x)` draws one curve per item
 * `total mean median min max count stdev stdevp variance varp mad quartile corr cov sort unique join shuffle random`
+* Statistics plots: `histogram(L, w)`, `boxplot(L)`, `dotplot(L)`
 * Distributions: `normpdf normcdf invnorm binompdf binomcdf poissonpdf poissoncdf exppdf expcdf unifpdf unifcdf`
 
 **Tables & regression**
 
-* Tables expose lists `x_1`, `y_1`, … 
+* Tables expose lists `x_1`, `y_1`, … ; add more columns (`+ column`) and rename them to use as lists
 * Least-squares regression with **any model**: `y_1 ~ m x_1 + b`, `y_1 ~ a x_1^2 + b x_1 + c`, `y_1 ~ a*e^(b x_1)` — shows parameters, r² and residuals `e_1`
 
 **Exploring the graph**
@@ -137,7 +151,8 @@ Graphical-Calculator/
 │   └── js/
 │       ├── mathengine.js    #   tokenizer, parser, list/stat runtime, code generator
 │       ├── latex.js         #   LaTeX <-> text converters for the live formula editor
-│       ├── graph.js         #   canvas renderer & interaction (marching squares, POIs, tracing, tangents)
+│       ├── graph.js         #   2D canvas renderer & interaction (marching squares, POIs, tracing, tangents, domain colouring)
+│       ├── graph3d.js       #   3D renderer (projection, shaded meshes, marching tetrahedra)
 │       └── app.js           #   UI, evaluation pipeline, sliders, tables, folders, regression
 ├── desktop/                 # 🖥️ Python/PySide6 edition
 │   ├── main.py
@@ -171,10 +186,13 @@ Graphical-Calculator/
 - [x] Live formula editor
 - [x] Complex numbers
 - [x] Tangent / secant lines
-- [ ] Complex functions of a complex variable (domain colouring)
-- [ ] Actions / ticker
-- [ ] 3D graphs
-- [ ] Histograms, box plots and more statistics plots
+- [x] Complex domain colouring
+- [x] Actions / ticker
+- [x] 3D graphs (surfaces, curves, parametric & implicit surfaces, points)
+- [x] Histograms, box plots, dot plots; list comprehensions; multi-column tables
+- [ ] 3D inequalities, 3D tangent planes, and 3D point dragging
+- [ ] Geometry / scientific calculator modes
+- [ ] More statistics plots (bar plots, scatter matrices) and further regression families
 
 ---
 

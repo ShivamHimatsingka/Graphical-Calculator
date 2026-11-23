@@ -40,6 +40,7 @@
   <div id="split" title="Drag to resize"></div>
   <main id="stage">
     <div id="graphHost"></div>
+    <div id="graph3Host" style="display:none"></div>
     <div id="tip"></div>
     <div id="coords"></div>
     <button id="btnExpand" class="ib float" title="Show expression list" aria-label="Show list" hidden></button>
@@ -51,6 +52,7 @@
       <div id="toolInfo"></div>
     </div>
     <div class="gctrl">
+      <button id="btn3d" class="ib txt" title="Switch to the 3D graph">3D</button>
       <button id="btnSettings" class="ib" title="Graph settings" aria-label="Graph settings"></button>
       <button id="btnHome" class="ib" title="Reset view" aria-label="Reset view"></button>
       <button id="btnZoomIn" class="ib" title="Zoom in" aria-label="Zoom in">+</button>
@@ -77,6 +79,7 @@ window.mlReady = new Promise(function (resolve) {
 <script src="js/mathengine.js"></script>
 <script src="js/latex.js"></script>
 <script src="js/graph.js"></script>
+<script src="js/graph3d.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

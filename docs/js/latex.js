@@ -23,7 +23,7 @@
     ldots: '...', dots: '...', cdots: '...', ldotp: '...', degree: '°', circ: '°', prime: "'", lbrace: '{', rbrace: '}',
     '{': '{', '}': '}', lbrack: '[', rbrack: ']', vert: '|', mid: '|', '|': '|', '%': '%', '#': '', '&': '', '$': '',
     ',': '', ';': '', '!': '', ':': '', ' ': '', quad: '', qquad: '', space: '', '\\': '',
-    pm: '±', rightarrow: '', to: '',
+    pm: '±', rightarrow: '->', to: '->', mapsto: '->', longrightarrow: '->',
   };
 
   function tokenize(t) {

@@ -182,6 +182,7 @@
     neg: (a) => bcast((x) => (x instanceof Pt ? new Pt(-x.x, -x.y) : x instanceof Cx ? new Cx(-x.re, -x.im) : -x), [a]),
     cmp: (op, a, b) => bcast(CMP[op], [a, b]),
     land: (...xs) => bcast((...v) => v.every(Boolean), xs),
+    comp: (L, fn) => (Array.isArray(L) ? L.map((v) => fn(v)) : [fn(L)]),
     range(a, b, next) {
       const step = next === undefined ? 1 : next - a;
       if (!Number.isFinite(a) || !Number.isFinite(b) || !step || !Number.isFinite(step)) return [];
@@ -269,10 +270,16 @@
     unifpdf: (x, a = 0, b = 1) => (x >= a && x <= b ? 1 / (b - a) : 0),
     unifcdf: (x, a = 0, b = 1) => (x <= a ? 0 : x >= b ? 1 : (x - a) / (b - a)),
   });
+  Object.assign(R, {
+    histogram: (L, w) => ({ __plot: 'hist', data: nums(L), w: Number.isFinite(w) && w > 0 ? w : 0 }),
+    boxplot: (L, w) => ({ __plot: 'box', data: nums(L), w: Number.isFinite(w) && w > 0 ? w : 1 }),
+    dotplot: (L, w) => ({ __plot: 'dots', data: nums(L), w: Number.isFinite(w) && w > 0 ? w : 0 }),
+  });
   function clampQ(q) { return Math.max(0, Math.min(4, Number.isFinite(q) ? q : 2)); }
-  const AGG = new Set(['shuffle', 'total', 'mean', 'median', 'min', 'max', 'count', 'length', 'stdev', 'stdevp', 'variance', 'varp', 'mad', 'quartile', 'corr', 'cov', 'sort', 'unique', 'join']);
+  const AGG = new Set(['histogram', 'boxplot', 'dotplot', 'shuffle', 'total', 'mean', 'median', 'min', 'max', 'count', 'length', 'stdev', 'stdevp', 'variance', 'varp', 'mad', 'quartile', 'corr', 'cov', 'sort', 'unique', 'join']);
   const AGG_ALWAYS = new Set([...AGG].filter((x) => x !== 'min' && x !== 'max'));
   const LISTVARS = new Set();
+  const CXLOCAL = new Set();  // parameters of the function being compiled that hold complex values
   const CXVARS = new Set();   // variables holding complex values
   const CXFUNCS = new Set();  // user functions returning complex values
 
@@ -302,7 +309,7 @@
       .replace(/\\ge(?![a-z])/g, '>=').replace(/\\pi/g, 'pi').replace(/\\theta/g, 'theta');
     const toks = [];
     let i = 0;
-    const known = new Set([...BUILTINS, ...SPECIAL, ...Object.keys(CONSTS), 'theta', ...(userNames || [])]);
+    const known = new Set([...BUILTINS, ...SPECIAL, 'for', ...Object.keys(CONSTS), 'theta', ...(userNames || [])]);
     while (i < s.length) {
       const ch = s[i];
       if (/\s/.test(ch)) { i++; continue; }
@@ -371,6 +378,7 @@
         continue;
       }
       if (ch === '!' && s[i + 1] === '=') { toks.push({ t: 'rel', v: '!=' }); i += 2; continue; }
+      if ((ch === '-' && s[i + 1] === '>') || ch === '\u2192') { toks.push({ t: 'arrow' }); i += ch === '-' ? 2 : 1; continue; }
       if ('+-*/^!'.includes(ch)) { toks.push({ t: 'op', v: ch }); i++; continue; }
       if (ch === '(') { toks.push({ t: 'lp' }); i++; continue; }
       if (ch === ')') { toks.push({ t: 'rp' }); i++; continue; }
@@ -406,6 +414,7 @@
     function startsAtom() {
       const k = peek();
       if (!k) return false;
+      if (k.t === 'id' && k.v === 'for') return false;
       if (k.t === 'num' || k.t === 'id' || k.t === 'lp') return true;
       if (k.t === 'pipe') return absDepth === 0;
       return false;
@@ -465,7 +474,7 @@
       for (;;) {
         if (is('op', '!')) { next(); node = { t: 'fact', a: node }; }
         else if (is('deg')) { next(); node = { t: 'bin', op: '*', a: node, b: { t: 'num', v: Math.PI / 180 } }; }
-        else if (is('lbr') && ['var', 'call', 'list', 'range', 'index'].includes(node.t)) {
+        else if (is('lbr') && ['var', 'call', 'list', 'range', 'index', 'listcomp'].includes(node.t)) {
           next();
           const savedAbs = absDepth; absDepth = 0;
           const first = parseRelationOrExpr();
@@ -512,7 +521,13 @@
         if (is('rbr')) node = { t: 'list', items: [] };
         else {
           const first = parseExpr();
-          if (is('dots')) { next(); node = { t: 'range', a: first, b: parseExpr() }; }
+          if (is('id') && peek().v === 'for') {
+            next();
+            const vt = expect('id', 'a variable name');
+            if (!is('rel', '=')) throw new MathError('Expected = after "for n"');
+            next();
+            node = { t: 'listcomp', e: first, v: vt.v, src: parseExpr() };
+          } else if (is('dots')) { next(); node = { t: 'range', a: first, b: parseExpr() }; }
           else if (is('comma')) {
             next();
             const second = parseExpr();
@@ -643,6 +658,7 @@
       case 'call': return n.args;
       case 'tuple': case 'list': return n.items;
       case 'range': return [n.a, n.next, n.b].filter(Boolean);
+      case 'listcomp': return [n.e, n.src];
       case 'index': return [n.a, n.idx];
       case 'rel': return n.parts;
       case 'pw': return n.cases.flatMap((c) => [c.cond, c.val]).concat(n.def ? [n.def] : []);
@@ -676,6 +692,7 @@
           break;
         case 'tuple': n.items.forEach((a) => rec(a, b)); break;
         case 'pw': n.cases.forEach((c) => { rec(c.cond, b); rec(c.val, b); }); rec(n.def, b); break;
+        case 'listcomp': { const nb = new Set(b); nb.add(n.v); rec(n.src, b); rec(n.e, nb); break; }
         case 'rel': n.parts.forEach((a) => rec(a, b)); break;
         default: kids(n).forEach((a) => rec(a, b)); break;
       }
@@ -708,6 +725,7 @@
         case 'list': return { t: 'list', items: n.items.map(rec) };
         case 'range': return { t: 'range', a: rec(n.a), next: n.next ? rec(n.next) : undefined, b: rec(n.b) };
         case 'index': return { t: 'index', a: rec(n.a), idx: rec(n.idx) };
+        case 'listcomp': return { t: 'listcomp', e: rec(n.e), v: n.v, src: rec(n.src) };
         case 'pw': return { t: 'pw', cases: n.cases.map((c) => ({ cond: rec(c.cond), val: rec(c.val) })), def: rec(n.def) };
         case 'call': {
           const args = n.args.map(rec);
@@ -732,7 +750,7 @@
   function listValued(n, locals) {
     locals = locals || new Set();
     switch (n.t) {
-      case 'list': case 'range': return true;
+      case 'list': case 'range': case 'listcomp': return true;
       case 'var': return !locals.has(n.n) && LISTVARS.has(n.n);
       case 'index': return listValued(n.a, locals) && (n.idx.t === 'range' || n.idx.t === 'rel' || listValued(n.idx, locals));
       case 'neg': case 'fact': return listValued(n.a, locals);
@@ -760,8 +778,8 @@
   }
   function touches(n, locals) {
     switch (n.t) {
-      case 'list': case 'range': case 'index': return true;
-      case 'var': return !locals.has(n.n) && (n.n === 'i' || LISTVARS.has(n.n) || CXVARS.has(n.n));
+      case 'list': case 'range': case 'index': case 'listcomp': return true;
+      case 'var': return locals.has(n.n) ? CXLOCAL.has(n.n) : (n.n === 'i' || LISTVARS.has(n.n) || CXVARS.has(n.n));
       case 'call': if (AGG_ALWAYS.has(n.n) || (n.n === 'random' && n.args.length) || CXFUNCS.has(n.n)) return true; return n.args.some((a) => touches(a, locals));
       default: return kids(n).some((k) => touches(k, locals));
     }
@@ -771,6 +789,7 @@
     const g = (x) => gen(x, locals);
     switch (n.t) {
       case 'list': return '[' + n.items.map(g).join(',') + ']';
+      case 'listcomp': { const inner = new Set(locals); inner.add(n.v); return `H.comp(${g(n.src)},(${jsId(n.v)})=>${gen(n.e, inner)})`; }
       case 'range': return `H.range(${g(n.a)},${g(n.b)}${n.next ? ',' + g(n.next) : ''})`;
       case 'index': return `H.index(${g(n.a)},${g(n.idx)})`;
       case 'neg': return `H.neg(${g(n.a)})`;
@@ -865,9 +884,12 @@
   const V = Object.create(null); // variable values
   const F = Object.create(null); // user functions
 
-  function compile(ast, params) {
+  function compile(ast, params, opts) {
     const locals = new Set(params);
-    const body = gen(ast, locals);
+    CXLOCAL.clear();
+    if (opts && opts.complex) opts.complex.forEach((p) => CXLOCAL.add(p));
+    let body;
+    try { body = gen(ast, locals); } finally { CXLOCAL.clear(); }
     const plist = params.map(jsId).join(',');
     // eslint-disable-next-line no-new-func
     return new Function('R', 'V', 'F', 'H', `"use strict"; return (${plist})=>{try{return ${body};}catch(e){return NaN;}};`)(R, V, F, H);
@@ -887,6 +909,6 @@
 
   global.ME = {
     R, V, F, BUILTINS, CONSTS, MathError, parseStatement, resolve, compile, freeVars, calledFns,
-    walk, fmt, DEG, tokenize, gen, LISTVARS, CXVARS, CXFUNCS, listValued, complexValued, Pt, Cx, H, kids,
+    walk, fmt, DEG, tokenize, gen, LISTVARS, CXVARS, CXFUNCS, CXLOCAL, listValued, complexValued, Pt, Cx, H, kids,
   };
 })(window);

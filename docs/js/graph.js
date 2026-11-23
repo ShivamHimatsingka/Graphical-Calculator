@@ -163,9 +163,10 @@
       for (const p of this.plots) p._sel = p.id === this.selectedId;
       ctx.save();
       ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      for (const p of vis) if (p.kind === 'domain') { try { this.drawDomain(ctx, p); } catch (e) { /* ignore */ } }
       for (const p of vis) if (p.kind === 'ineq') this.drawIneq(ctx, p);
       for (const p of vis) {
-        if (p.kind === 'ineq') continue;
+        if (p.kind === 'ineq' || p.kind === 'domain') continue;
         p._seg = null;
         try {
           switch (p.kind) {
@@ -176,6 +177,7 @@
             case 'implicit': this.drawImplicit(ctx, p); break;
             case 'table': this.drawTable(ctx, p); break;
             case 'points': this.drawPoints(ctx, p); break;
+            case 'stat': this.drawStat(ctx, p); break;
             default: break;
           }
         } catch (e) { /* ignore per-plot failures */ }
@@ -427,6 +429,77 @@
       for (const q of list) this.dot(ctx, this.X(q.x), this.Y(q.y), p.color, p.size || 4.5);
     }
 
+    /* complex domain colouring: hue = arg f(z), brightness bands = log2 |f(z)| */
+    drawDomain(ctx, p) {
+      const cell = this.interacting ? 8 : 3;
+      const W = this.w, H = this.h, nx = Math.ceil(W / cell), ny = Math.ceil(H / cell);
+      const img = new ImageData(nx, ny), d = img.data;
+      for (let j = 0; j < ny; j++) {
+        const y = this.invY((j + 0.5) * cell);
+        for (let i = 0; i < nx; i++) {
+          const w = p.eval(this.invX((i + 0.5) * cell), y);
+          if (!w || !Number.isFinite(w[0]) || !Number.isFinite(w[1])) continue;
+          const mag = Math.hypot(w[0], w[1]);
+          const h = ((Math.atan2(w[1], w[0]) / TAU) + 1) % 1;
+          let v = 0.5, sat = 0.9;
+          if (mag === 0) { v = 0; } else { const t = Math.log2(mag); v = 0.5 + 0.5 * (t - Math.floor(t)); sat = 0.55 + 0.45 * (1 - 0.5 * (t - Math.floor(t))); }
+          const k = Math.floor(h * 6), f = h * 6 - k, pp = v * (1 - sat), q = v * (1 - f * sat), t2 = v * (1 - (1 - f) * sat);
+          const rgb = [[v, t2, pp], [q, v, pp], [pp, v, t2], [pp, q, v], [t2, pp, v], [v, pp, q]][k % 6];
+          const o = (j * nx + i) * 4; d[o] = rgb[0] * 255; d[o + 1] = rgb[1] * 255; d[o + 2] = rgb[2] * 255; d[o + 3] = 255;
+        }
+      }
+      const tmp = this._tmp2 || (this._tmp2 = document.createElement('canvas'));
+      tmp.width = nx; tmp.height = ny; tmp.getContext('2d').putImageData(img, 0, 0);
+      ctx.save(); ctx.globalAlpha = p.alpha === undefined ? 0.88 : p.alpha; ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(tmp, 0, 0, nx * cell, ny * cell); ctx.restore();
+    }
+
+    /* histogram / box plot / dot plot */
+    drawStat(ctx, p) {
+      let m; try { m = p.get(); } catch (e) { return; }
+      if (!m || !m.__plot) return;
+      const data = m.data.filter(Number.isFinite).sort((a, b) => a - b);
+      const n = data.length; if (!n) return;
+      const col = p.color;
+      ctx.save();
+      ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = p.width || 2; ctx.setLineDash([]);
+      if (m.__plot === 'hist') {
+        const lo = data[0], hi = data[n - 1];
+        let w = m.w;
+        if (!w) w = hi > lo ? niceStep((hi - lo) / Math.max(1, Math.ceil(Math.log2(n) + 1))).step : 1;
+        const start = Math.floor(lo / w) * w, nb = Math.floor((hi - start) / w + 1e-9) + 1;
+        if (nb > 5000) { ctx.restore(); return; }
+        const counts = new Array(nb).fill(0);
+        for (const v of data) counts[Math.min(nb - 1, Math.floor((v - start) / w + 1e-9))]++;
+        counts.forEach((c, k) => {
+          if (!c) return;
+          const x0 = this.X(start + k * w), x1 = this.X(start + (k + 1) * w), y0 = this.Y(0), y1 = this.Y(c);
+          ctx.globalAlpha = 0.35; ctx.fillRect(x0, y1, x1 - x0, y0 - y1);
+          ctx.globalAlpha = 1; ctx.strokeRect(x0, y1, x1 - x0, y0 - y1);
+        });
+      } else if (m.__plot === 'box') {
+        const q = (f) => { const pos = f * (n - 1), a = Math.floor(pos), b = Math.ceil(pos); return data[a] + (data[b] - data[a]) * (pos - a); };
+        const q1 = q(0.25), q2 = q(0.5), q3 = q(0.75), iqr = q3 - q1;
+        const inl = data.filter((v) => v >= q1 - 1.5 * iqr && v <= q3 + 1.5 * iqr);
+        const wl = inl[0], wh = inl[inl.length - 1], hw = (m.w || 1) / 2;
+        const yt = this.Y(hw), yb = this.Y(-hw), ym = this.Y(0);
+        ctx.globalAlpha = 0.25; ctx.fillRect(this.X(q1), yt, this.X(q3) - this.X(q1), yb - yt);
+        ctx.globalAlpha = 1; ctx.strokeRect(this.X(q1), yt, this.X(q3) - this.X(q1), yb - yt);
+        ctx.beginPath();
+        ctx.moveTo(this.X(q2), yt); ctx.lineTo(this.X(q2), yb);
+        ctx.moveTo(this.X(wl), ym); ctx.lineTo(this.X(q1), ym); ctx.moveTo(this.X(q3), ym); ctx.lineTo(this.X(wh), ym);
+        ctx.moveTo(this.X(wl), this.Y(hw / 2)); ctx.lineTo(this.X(wl), this.Y(-hw / 2)); ctx.moveTo(this.X(wh), this.Y(hw / 2)); ctx.lineTo(this.X(wh), this.Y(-hw / 2));
+        ctx.stroke();
+        for (const v of data) if (v < q1 - 1.5 * iqr || v > q3 + 1.5 * iqr) { ctx.beginPath(); ctx.arc(this.X(v), ym, 3.5, 0, TAU); ctx.stroke(); }
+      } else { // dots
+        const lo = data[0], hi = data[n - 1];
+        const w = m.w || (hi > lo ? niceStep((hi - lo) / 30).step : 1);
+        const stacks = new Map();
+        for (const v of data) { const key = Math.round(v / w); const c = (stacks.get(key) || 0); stacks.set(key, c + 1); ctx.beginPath(); ctx.arc(this.X(key * w), this.Y(0) - 8 - c * 11, 4.8, 0, TAU); ctx.fill(); }
+      }
+      ctx.restore();
+    }
+
     dot(ctx, x, y, color, rad) {
       if (!Number.isFinite(x) || !Number.isFinite(y) || x < -50 || y < -50 || x > this.w + 50 || y > this.h + 50) return;
       ctx.beginPath(); ctx.arc(x, y, rad + 1.5, 0, TAU); ctx.fillStyle = this.theme.bg; ctx.globalAlpha = 0.9; ctx.fill(); ctx.globalAlpha = 1;
@@ -439,6 +512,12 @@
       if (p.cond && !p.cond()) { p._pt = null; return; }
       p._pt = pt;
       this.dot(ctx, this.X(pt[0]), this.Y(pt[1]), p.color, p.size || 5.5);
+      if (p.label) {
+        const txt = p.label === 'coords' ? `(${fmtCoord(pt[0])}, ${fmtCoord(pt[1])})` : p.label;
+        ctx.save(); ctx.font = '13px -apple-system, "Segoe UI", Roboto, sans-serif'; ctx.textBaseline = 'bottom';
+        ctx.lineWidth = 4; ctx.strokeStyle = this.theme.bg; ctx.fillStyle = p.color; ctx.lineJoin = 'round';
+        ctx.strokeText(txt, this.X(pt[0]) + 9, this.Y(pt[1]) - 7); ctx.fillText(txt, this.X(pt[0]) + 9, this.Y(pt[1]) - 7); ctx.restore();
+      }
     }
 
     /* ---------- implicit curves (marching squares) ---------- */

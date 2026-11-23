@@ -8,7 +8,7 @@ const toText = [
   ['\\operatorname{sum}\\left(n,1,10,n^2\\right)', 'sum(n,1,10,n^2)'], ['\\sum_{n=1}^{10}n^2', 'sum(n,1,10,n^2)'],
   ['\\int_{0}^{1}x^2dx', 'int(0,1,x^2)'], ['f^{\\prime}\\left(x\\right)', "f'(x)"], ['\\lbrack 1\\ldots 5\\rbrack', '[1...5]'],
   ['x^{-1}', 'x^(-1)'], ['\\sqrt[3]{x}', 'cbrt(x)'], ['2\\cdot 3', '2*3'], ['\\frac{x^{2}}{x+1}', '((x^2)/(x+1))'],
-  ['a_{12}', 'a_12'], ['\\sin^{2}\\left(x\\right)', 'sin^2(x)'], ['e^{i\\pi}', 'e^(ipi)'], ['x\\le 3', 'x<=3'],
+  ['a_{12}', 'a_12'], ['n\\rightarrow n+1', 'n->n+1'], ['\\left[n^{2}\\operatorname{for}n=\\left[1\\ldots 5\\right]\\right]', '[n^2forn=[1...5]]'], ['\\sin^{2}\\left(x\\right)', 'sin^2(x)'], ['e^{i\\pi}', 'e^(ipi)'], ['x\\le 3', 'x<=3'],
 ];
 const roundTrip = [
   'y=x^2', 'y=sqrt(x+1)', 'r=3cos(4theta){0<=theta<=2pi}', 'y_1~m*x_1+b', 'L=[1...10]', 'y=log_2(x)', 'y=asin(x)', 'f(x)=x^3-3x',
