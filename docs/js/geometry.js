@@ -21,7 +21,9 @@
     { id: 'perp', icon: '⟂', label: 'Perpendicular', hint: 'Click a point and a line (either order)' },
     { id: 'parallel', icon: '∥', label: 'Parallel', hint: 'Click a point and a line (either order)' },
     { id: 'bisector', icon: '∠/', label: 'Bisector', hint: 'Click three points: the angle’s vertex is the middle one' },
-    { id: 'intersect', icon: '✕', label: 'Intersect', hint: 'Click two lines/circles' },
+    { id: 'intersect', icon: '✕', label: 'Intersect', hint: 'Click two lines, circles or conics' },
+    { id: 'pointon', icon: '⊙', label: 'Point on', hint: 'Click a line, circle or conic to attach a point to it (then drag it along)' },
+    { id: 'locus', icon: '∿', label: 'Locus', hint: 'Click the moving point (a point on an object), then the point whose path you want' },
     { id: 'polygon', icon: '▱', label: 'Polygon', hint: 'Click points; click the first point again to close' },
     { id: 'ellipse', icon: '⬭', label: 'Ellipse', hint: 'Click two foci, then a point on the ellipse' },
     { id: 'hyperbola', icon: '⌒⌒', label: 'Hyperbola', hint: 'Click two foci, then a point on the hyperbola' },
@@ -35,14 +37,14 @@
     { id: 'area', icon: '▨', label: 'Area', hint: 'Click a polygon or a circle to measure its area and perimeter' },
     { id: 'delete', icon: '⌫', label: 'Delete', hint: 'Click an object to delete it (and anything built on it)' },
   ];
-  const POINT_TYPES = ['pt', 'mid', 'int', 'tpt'];
+  const POINT_TYPES = ['pt', 'mid', 'int', 'tpt', 'onp'];
   const LINE_TYPES = ['seg', 'line', 'ray', 'perp', 'par', 'bis'];
   const CONIC_TYPES = ['ell', 'hyp', 'parab'];
-  const COLORS = { pt: '#2d70b3', curve: '#2d70b3', poly: '#6042a6', meas: '#c74440', hi: '#fa7e19', img: '#388c46' };
+  const COLORS = { locus: '#00897b', onp: '#c9a227', pt: '#2d70b3', curve: '#2d70b3', poly: '#6042a6', meas: '#c74440', hi: '#fa7e19', img: '#388c46' };
   const sub = (a, b) => [a[0] - b[0], a[1] - b[1]];
   const cross = (a, b) => a[0] * b[1] - a[1] * b[0];
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1];
-  const REF_KEYS = ['a', 'b', 'c', 'p', 'l', 'src', 'f1', 'f2', 'f', 'd'];
+  const REF_KEYS = ['a', 'b', 'c', 'p', 'l', 'src', 'f1', 'f2', 'f', 'd', 'obj', 'drv', 'tr'];
 
   class Geo {
     constructor(graph, opts) {
@@ -89,6 +91,7 @@
         const A = this.shape(this.get(o.a), depth + 1), B = this.shape(this.get(o.b), depth + 1);
         return A && B ? this._intersect(A, B, o.k) : null;
       }
+      if (o.t === 'onp') { const S = this.shape(this.get(o.obj), depth + 1); return S ? this._onPos(S, o) : null; }
       if (o.t === 'tpt') {
         const P = this.pos(this.get(o.src), depth + 1); if (!P) return null;
         if (o.op === 'reflect') {
@@ -171,9 +174,109 @@
       }
       return polys;
     }
+    /* ----- points constrained to an object, and loci ----- */
+    _onPos(S, o) {
+      if (S.k === 'circ') return [S.c[0] + S.r * Math.cos(o.s), S.c[1] + S.r * Math.sin(o.s)];
+      if (S.k === 'conic') {
+        const w = [-S.u[1], S.u[0]];
+        if (S.type === 'ell') return [S.c[0] + S.a * Math.cos(o.s) * S.u[0] + S.b * Math.sin(o.s) * w[0], S.c[1] + S.a * Math.cos(o.s) * S.u[1] + S.b * Math.sin(o.s) * w[1]];
+        if (S.type === 'hyp') { const br = o.br || 1; return [S.c[0] + br * S.a * Math.cosh(o.s) * S.u[0] + S.b * Math.sinh(o.s) * w[0], S.c[1] + br * S.a * Math.cosh(o.s) * S.u[1] + S.b * Math.sinh(o.s) * w[1]]; }
+        return [S.v[0] + S.t[0] * o.s + S.n[0] * o.s * o.s / (2 * S.p), S.v[1] + S.t[1] * o.s + S.n[1] * o.s * o.s / (2 * S.p)];
+      }
+      return [S.p[0] + o.s * S.d[0], S.p[1] + o.s * S.d[1]];
+    }
+    _onParam(S, q) {
+      if (S.k === 'circ') return { s: Math.atan2(q[1] - S.c[1], q[0] - S.c[0]) };
+      if (S.k === 'conic') {
+        if (S.type === 'par') return { s: dot(sub(q, S.v), S.t) };
+        const w = [-S.u[1], S.u[0]], d = sub(q, S.c), x = dot(d, S.u), y = dot(d, w);
+        if (S.type === 'ell') return { s: Math.atan2(y / S.b, x / S.a) };
+        return { s: Math.asinh(y / S.b), br: x >= 0 ? 1 : -1 };
+      }
+      let t = dot(sub(q, S.p), S.d) / dot(S.d, S.d);
+      if (S.k === 'seg') t = Math.max(0, Math.min(1, t)); else if (S.k === 'ray') t = Math.max(0, t);
+      return { s: t };
+    }
+    locusPts(o) {
+      const d = this.get(o.drv), tr = this.get(o.tr);
+      if (!d || !tr || d.t !== 'onp') return [];
+      const S = this.shape(this.get(d.obj)); if (!S) return [];
+      const r = this.g.range(), ext = 2 * Math.hypot(r.xmax - r.xmin, r.ymax - r.ymin);
+      let lo, hi;
+      if (S.k === 'circ' || (S.k === 'conic' && S.type === 'ell')) { lo = -Math.PI; hi = Math.PI; }
+      else if (S.k === 'conic') { lo = S.type === 'hyp' ? -4 : -ext; hi = S.type === 'hyp' ? 4 : ext; }
+      else { const dl = Math.hypot(...S.d); if (S.k === 'seg') { lo = 0; hi = 1; } else if (S.k === 'ray') { lo = 0; hi = ext / dl; } else { lo = -ext / dl; hi = ext / dl; } }
+      const save = { s: d.s, br: d.br }, pts = [], n = 400;
+      for (let i = 0; i <= n; i++) { d.s = lo + (hi - lo) * i / n; pts.push(this.pos(tr)); }
+      d.s = save.s; d.br = save.br;
+      return pts;
+    }
+    // sampled world polylines + implicit function for a shape (used for conic intersections)
+    _polys(S) {
+      const r = this.g.range(), ext = 3 * Math.hypot(r.xmax - r.xmin, r.ymax - r.ymin);
+      if (S.k === 'conic') return this.conicPolys(S);
+      if (S.k === 'circ') { const pts = []; for (let i = 0; i <= 360; i++) pts.push([S.c[0] + S.r * Math.cos(i * Math.PI / 180), S.c[1] + S.r * Math.sin(i * Math.PI / 180)]); return [pts]; }
+      const dl = Math.hypot(...S.d), u = [S.d[0] / dl, S.d[1] / dl];
+      const line = (a, b, n) => { const pts = []; for (let i = 0; i <= n; i++) pts.push([a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n]); return pts; };
+      if (S.k === 'seg') return [line(S.p, [S.p[0] + S.d[0], S.p[1] + S.d[1]], 200)];
+      if (S.k === 'ray') return [line(S.p, [S.p[0] + u[0] * ext, S.p[1] + u[1] * ext], 800)];
+      return [line([S.p[0] - u[0] * ext, S.p[1] - u[1] * ext], [S.p[0] + u[0] * ext, S.p[1] + u[1] * ext], 1200)];
+    }
+    _implicit(S) {
+      if (S.k === 'circ') return (x, y) => (x - S.c[0]) ** 2 + (y - S.c[1]) ** 2 - S.r * S.r;
+      if (S.k === 'conic') {
+        if (S.type === 'par') return (x, y) => { const dx = x - S.v[0], dy = y - S.v[1], s = dx * S.t[0] + dy * S.t[1], q = dx * S.n[0] + dy * S.n[1]; return q - s * s / (2 * S.p); };
+        const w = [-S.u[1], S.u[0]];
+        return S.type === 'ell'
+          ? (x, y) => { const dx = x - S.c[0], dy = y - S.c[1], a = dx * S.u[0] + dy * S.u[1], b = dx * w[0] + dy * w[1]; return a * a / (S.a * S.a) + b * b / (S.b * S.b) - 1; }
+          : (x, y) => { const dx = x - S.c[0], dy = y - S.c[1], a = dx * S.u[0] + dy * S.u[1], b = dx * w[0] + dy * w[1]; return a * a / (S.a * S.a) - b * b / (S.b * S.b) - 1; };
+      }
+      return (x, y) => S.d[0] * (y - S.p[1]) - S.d[1] * (x - S.p[0]); // signed distance-like for lines
+    }
+    _validOn(S, P) {
+      if (S.k === 'seg' || S.k === 'ray') return this._inRange(S.k, dot(sub(P, S.p), S.d) / dot(S.d, S.d));
+      return true;
+    }
+    // Newton polish so the point lies on both curves (the polyline is only a sampling)
+    _refine(P, f, g) {
+      let x = P[0], y = P[1];
+      const h = 1e-6 * (1 + Math.hypot(x, y));
+      for (let it = 0; it < 8; it++) {
+        const fv = f(x, y), gv = g(x, y);
+        if (!Number.isFinite(fv) || !Number.isFinite(gv)) break;
+        const fx = (f(x + h, y) - f(x - h, y)) / (2 * h), fy = (f(x, y + h) - f(x, y - h)) / (2 * h);
+        const gx = (g(x + h, y) - g(x - h, y)) / (2 * h), gy = (g(x, y + h) - g(x, y - h)) / (2 * h);
+        const det = fx * gy - fy * gx; if (Math.abs(det) < 1e-12) break;
+        const dx = (fv * gy - fy * gv) / det, dy = (fx * gv - fv * gx) / det;
+        x -= dx; y -= dy;
+        if (Math.hypot(dx, dy) < 1e-13) break;
+      }
+      return [x, y];
+    }
+    intersectAll(A, B) {
+      const g = this._implicit(B), gA = this._implicit(A), out = [];
+      const r = this.g.range(), tol = 1e-6 * Math.hypot(r.xmax - r.xmin, r.ymax - r.ymin);
+      for (const poly of this._polys(A)) {
+        for (let i = 1; i < poly.length; i++) {
+          let p0 = poly[i - 1], p1 = poly[i], g0 = g(p0[0], p0[1]), g1 = g(p1[0], p1[1]);
+          if (!(Number.isFinite(g0) && Number.isFinite(g1)) || g0 * g1 > 0) continue;
+          if (g0 === 0 && g1 === 0) continue;
+          for (let it = 0; it < 50; it++) {
+            const m = [(p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2], gm = g(m[0], m[1]);
+            if (gm * g0 <= 0) { p1 = m; g1 = gm; } else { p0 = m; g0 = gm; }
+          }
+          let P = [(p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2];
+          P = this._refine(P, gA, g);
+          if (!this._validOn(A, P) || !this._validOn(B, P)) continue;
+          if (Math.abs(g(P[0], P[1])) > 1e-3 * (1 + Math.abs(g0))) { /* near an asymptote jump, not a root */ if (Math.abs(g(P[0], P[1])) > 1) continue; }
+          if (!out.some((q) => Math.hypot(q[0] - P[0], q[1] - P[1]) < tol * 5)) out.push(P);
+        }
+      }
+      return out;
+    }
     _inRange(k, t) { return k === 'seg' ? t >= -1e-9 && t <= 1 + 1e-9 : k === 'ray' ? t >= -1e-9 : true; }
     _intersect(A, B, k) {
-      if (A.k === 'conic' || B.k === 'conic') return null;
+      if (A.k === 'conic' || B.k === 'conic') { const all = this.intersectAll(A, B); return all[k] || null; }
       if (A.k !== 'circ' && B.k !== 'circ') {
         const den = cross(A.d, B.d); if (Math.abs(den) < 1e-12) return null;
         const w = sub(B.p, A.p), t = cross(w, B.d) / den, u = cross(w, A.d) / den;
@@ -238,6 +341,18 @@
         }
         ctx.stroke();
       }
+      for (const o of this.objects) if (o.t === 'locus') {
+        const pts = this.locusPts(o);
+        ctx.strokeStyle = hi(o) ? COLORS.hi : COLORS.locus; ctx.lineWidth = hi(o) ? 3.4 : 2.4; ctx.setLineDash([]);
+        ctx.beginPath(); let pen = false, lx = 0, ly = 0;
+        for (const q of pts) {
+          if (!q || !Number.isFinite(q[0]) || !Number.isFinite(q[1])) { pen = false; continue; }
+          const x = sx(q), y = sy(q);
+          if (pen && Math.hypot(x - lx, y - ly) < 400) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+          pen = true; lx = x; ly = y;
+        }
+        ctx.stroke();
+      }
       ctx.font = '13px -apple-system, "Segoe UI", Roboto, sans-serif';
       for (const o of this.objects) {
         if (o.t === 'dist') {
@@ -265,7 +380,7 @@
         const p = this.pos(o); if (!p) continue;
         const x = sx(p), y = sy(p), h = hi(o);
         ctx.beginPath(); ctx.arc(x, y, h ? 8 : 6.5, 0, Math.PI * 2); ctx.fillStyle = g.theme.bg; ctx.fill();
-        ctx.beginPath(); ctx.arc(x, y, h ? 6.2 : 4.8, 0, Math.PI * 2); ctx.fillStyle = h ? COLORS.hi : (o.t === 'pt' ? COLORS.pt : o.t === 'tpt' ? COLORS.img : '#6a6a6a'); ctx.fill();
+        ctx.beginPath(); ctx.arc(x, y, h ? 6.2 : 4.8, 0, Math.PI * 2); ctx.fillStyle = h ? COLORS.hi : (o.t === 'pt' ? COLORS.pt : o.t === 'tpt' ? COLORS.img : o.t === 'onp' ? COLORS.onp : '#6a6a6a'); ctx.fill();
         this._label(ctx, o.name, x + 10, y - 10, g.theme.text, true);
       }
       ctx.restore();
@@ -299,6 +414,9 @@
         } else if (o.t === 'ang') {
           const b = this.pos(this.get(o.b)); if (!b) continue;
           d = Math.abs(Math.hypot(sxp(b[0]) - mx, syp(b[1]) - my) - 26);
+        } else if (o.t === 'locus') {
+          const L = this.locusPts(o);
+          for (let k = 1; k < L.length; k++) if (L[k - 1] && L[k]) d = Math.min(d, segDist([sxp(L[k - 1][0]), syp(L[k - 1][1])], [sxp(L[k][0]), syp(L[k][1])]));
         } else if (o.t === 'area') {
           const m = this.measure(o); if (!m) continue;
           d = Math.hypot(sxp(m.c[0]) - mx, syp(m.c[1]) - my) - 40; d = Math.max(0, d);
@@ -325,18 +443,22 @@
       const g = this.g;
       if (type === 'hover') {
         const h = this.hit(wx, wy), id = h ? h.id : null;
-        g.over.style.cursor = this.tool === 'move' ? (h && h.t === 'pt' ? 'grab' : h ? 'pointer' : '') : (this.tool === 'delete' ? (h ? 'not-allowed' : '') : 'crosshair');
+        g.over.style.cursor = this.tool === 'move' ? (h && (h.t === 'pt' || h.t === 'onp') ? 'grab' : h ? 'pointer' : '') : (this.tool === 'delete' ? (h ? 'not-allowed' : '') : 'crosshair');
         if (id !== this.hover) { this.hover = id; g.requestDraw(false); }
         return false;
       }
       if (type === 'down') {
         if (this.tool !== 'move') return false;
         const h = this.hit(wx, wy, 'point');
-        if (h && h.t === 'pt') { this._snap(); this.drag = h; g.over.style.cursor = 'grabbing'; return true; }
+        if (h && (h.t === 'pt' || h.t === 'onp')) { this._snap(); this.drag = h; g.over.style.cursor = 'grabbing'; return true; }
         return false;
       }
       if (type === 'move') {
-        if (this.drag) { this.drag.x = wx; this.drag.y = wy; g.requestDraw(false); }
+        if (this.drag) {
+          if (this.drag.t === 'onp') { const S = this.shape(this.get(this.drag.obj)); if (S) { const r = this._onParam(S, [wx, wy]); this.drag.s = r.s; if (r.br) this.drag.br = r.br; } }
+          else { this.drag.x = wx; this.drag.y = wy; }
+          g.requestDraw(false);
+        }
         return true;
       }
       if (type === 'up') {
@@ -354,17 +476,28 @@
       return this._add({ t: 'pt', x: +wx.toFixed(4), y: +wy.toFixed(4) });
     }
     _transform(h, ref) {
-      const tool = this.tool, cache = new Map();
+      const tool = this.tool, pc = new Map(), oc = new Map();
       const base = { op: tool };
       if (tool === 'reflect') base.l = ref[0];
       else if (tool === 'translate') { base.a = ref[0]; base.b = ref[1]; }
       else { base.c = ref[0]; base.v = +this.param[tool]; if (!Number.isFinite(base.v)) base.v = tool === 'rotate' ? 90 : 2; }
-      const img = (id) => { if (!cache.has(id)) cache.set(id, this._add(Object.assign({ t: 'tpt', src: id }, base)).id); return cache.get(id); };
-      if (POINT_TYPES.includes(h.t)) { img(h.id); return true; }
-      if (['seg', 'line', 'ray'].includes(h.t)) { this._add({ t: h.t, a: img(h.a), b: img(h.b) }); return true; }
-      if (h.t === 'circ') { this._add({ t: 'circ', c: img(h.c), p: img(h.p) }); return true; }
-      if (h.t === 'poly') { this._add({ t: 'poly', pts: h.pts.map(img) }); return true; }
-      return false;
+      const imgPt = (id) => { if (!pc.has(id)) pc.set(id, this._add(Object.assign({ t: 'tpt', src: id }, base)).id); return pc.get(id); };
+      // similarities map lines, circles, conics and constructions onto the same construction built from the images
+      const imgObj = (id) => {
+        if (oc.has(id)) return oc.get(id);
+        const o = this.get(id); if (!o) return null;
+        let n = null;
+        if (POINT_TYPES.includes(o.t)) n = imgPt(id);
+        else if (['seg', 'line', 'ray'].includes(o.t)) n = this._add({ t: o.t, a: imgPt(o.a), b: imgPt(o.b) }).id;
+        else if (o.t === 'perp' || o.t === 'par') { const l = imgObj(o.l); n = l === null ? null : this._add({ t: o.t, p: imgPt(o.p), l }).id; }
+        else if (o.t === 'bis') n = this._add({ t: 'bis', a: imgPt(o.a), b: imgPt(o.b), c: imgPt(o.c) }).id;
+        else if (o.t === 'circ') n = this._add({ t: 'circ', c: imgPt(o.c), p: imgPt(o.p) }).id;
+        else if (o.t === 'ell' || o.t === 'hyp') n = this._add({ t: o.t, f1: imgPt(o.f1), f2: imgPt(o.f2), p: imgPt(o.p) }).id;
+        else if (o.t === 'parab') { const d = imgObj(o.d); n = d === null ? null : this._add({ t: 'parab', f: imgPt(o.f), d }).id; }
+        else if (o.t === 'poly') n = this._add({ t: 'poly', pts: o.pts.map(imgPt) }).id;
+        oc.set(id, n); return n;
+      };
+      return imgObj(h.id) !== null;
     }
     click(wx, wy) {
       const tool = this.tool, P = this.pending;
@@ -412,6 +545,22 @@
         } else { this.g.requestDraw(false); this._notify(); }
         return true;
       }
+      if (tool === 'pointon') {
+        const h = this.hit(wx, wy, 'curve'), S = h && this.shape(h);
+        if (!S) return true;
+        this._snap();
+        const r = this._onParam(S, [wx, wy]);
+        const o = { t: 'onp', obj: h.id, s: r.s }; if (r.br) o.br = r.br;
+        this._add(o); this._changed(); return true;
+      }
+      if (tool === 'locus') {
+        const h = this.hit(wx, wy, 'point');
+        if (!h) return true;
+        if (!P.length) { if (h.t !== 'onp') { if (this.opts.toast) this.opts.toast('First click a point that lies on an object (use the Point on tool)'); return true; } P.push(h.id); this.g.requestDraw(false); this._notify(); return true; }
+        if (h.id === P[0]) return true;
+        this._snap(); finish({ t: 'locus', drv: P[0], tr: h.id });
+        return true;
+      }
       if (tool === 'perp' || tool === 'parallel' || tool === 'parabola') {
         const pHit = this.hit(wx, wy, 'point'), lHit = pHit ? null : this.hit(wx, wy, 'curve');
         const isLine = (o) => o && LINE_TYPES.includes(o.t);
@@ -430,10 +579,11 @@
         if (P.length === 2) {
           this._snap();
           const A = this.shape(this.get(P[0])), B = this.shape(this.get(P[1]));
-          const need = (A.k === 'circ' || B.k === 'circ') ? 2 : 1;
+          const conic = A.k === 'conic' || B.k === 'conic';
+          const need = conic ? Math.min(8, this.intersectAll(A, B).length) : (A.k === 'circ' || B.k === 'circ') ? 2 : 1;
           let made = 0;
           for (let k = 0; k < need; k++) if (this._intersect(A, B, k)) { this._add({ t: 'int', a: P[0], b: P[1], k }); made++; }
-          if (!made && this.opts.toast) this.opts.toast(A.k === 'conic' || B.k === 'conic' ? 'Intersections with conics are not supported yet' : 'These objects do not intersect');
+          if (!made && this.opts.toast) this.opts.toast('These objects do not intersect');
           this.pending = []; this._changed();
         } else this.g.requestDraw(false);
         this._notify();

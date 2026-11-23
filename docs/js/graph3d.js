@@ -29,6 +29,23 @@
     return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : [45, 112, 179];
   }
 
+  // clip a convex polygon (world coordinates) to the half-space (P[axis]-pos)*(flip?-1:1) <= 0
+  function clipPoly(P, axis, pos, flip) {
+    const sg = flip ? -1 : 1, d = P.map((q) => (q[axis] - pos) * sg), out = [], cuts = [];
+    for (let i = 0; i < P.length; i++) {
+      const a = P[i], b = P[(i + 1) % P.length], da = d[i], db = d[(i + 1) % P.length];
+      if (da <= 0) out.push(a);
+      if ((da < 0 && db > 0) || (da > 0 && db < 0)) {
+        const t = da / (da - db), I = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+        out.push(I); cuts.push(I);
+      }
+    }
+    return { poly: out, seg: cuts.length === 2 ? cuts : null };
+  }
+  // project a normalised-cube point along the light direction L (pointing towards the light) onto the floor nz = -1
+  function shadowPoint(n, L) { const t = (n[2] + 1) / L[2]; return [n[0] - L[0] * t, n[1] - L[1] * t, -1]; }
+  function lightDir(az, el) { const a = az * Math.PI / 180, e = el * Math.PI / 180; return [Math.cos(e) * Math.cos(a), Math.cos(e) * Math.sin(a), Math.sin(e)]; }
+
   // marching tetrahedra tables
   const CORNERS = [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]];
   const TETS = [[0, 5, 1, 6], [0, 1, 2, 6], [0, 2, 3, 6], [0, 3, 7, 6], [0, 7, 4, 6], [0, 4, 5, 6]];
@@ -44,6 +61,8 @@
       this.box = [-5, 5, -5, 5, -5, 5];
       this.plots = [];
       this.settings = { grid: true, numbers: true, spin: false };
+      this.light = { mode: 'head', az: 40, el: 55, shadows: false };
+      this.section = { on: false, axis: 2, pos: 0, flip: false };
       this.w = 100; this.h = 100; this.dpr = 1;
       this.interacting = false;
       this._raf = 0; this._idle = 0; this._spin = 0;
@@ -61,6 +80,13 @@
     setPlots(p) { this.plots = p; }
     setBox(b) { if (b.length === 6 && b.every(Number.isFinite) && b[1] > b[0] && b[3] > b[2] && b[5] > b[4]) { this.box = b.slice(); this.requestDraw(false); } }
     resetView() { this.cam = { az: 0.85, el: 0.5, dist: 6.4 }; this.requestDraw(false); }
+    setLight(l) { Object.assign(this.light, l); this.requestDraw(false); }
+    setSection(sc) { Object.assign(this.section, sc); this.requestDraw(false); }
+    _keep(x, y, z) { // section visibility test for single points
+      if (!this.section.on) return true;
+      const v = [x, y, z][this.section.axis] - this.section.pos;
+      return (this.section.flip ? -v : v) <= 1e-9;
+    }
     zoom(f) { this.cam.dist = clamp(this.cam.dist / f, 2.2, 40); this.requestDraw(true); }
     setSpin(on) {
       this.settings.spin = !!on;
@@ -118,18 +144,36 @@
 
     /* ---------- geometry ---------- */
     _poly(prims, P, col, alpha) {
-      const pr = P.map((p) => this._proj(this._n(p[0], p[1], p[2])));
-      if (pr.some((q) => !q)) return;
+      if (this.section.on) {
+        const c = clipPoly(P, this.section.axis, this.section.pos, this.section.flip);
+        if (c.seg) {
+          const a = this._proj(this._n(c.seg[0][0], c.seg[0][1], c.seg[0][2])), b = this._proj(this._n(c.seg[1][0], c.seg[1][1], c.seg[1][2]));
+          if (a && b) prims.push({ t: 'seg', d: (a[2] + b[2]) / 2 - 0.04, a, b, c: '#fa7e19', w: 3 });
+        }
+        P = c.poly;
+        if (P.length < 3) return;
+      }
       const N = P.map((p) => this._n(p[0], p[1], p[2]));
-      // normal (normalised space)
+      const pr = N.map((q) => this._proj(q));
+      if (pr.some((q) => !q)) return;
       const a = [N[1][0] - N[0][0], N[1][1] - N[0][1], N[1][2] - N[0][2]], b = [N[2][0] - N[0][0], N[2][1] - N[0][1], N[2][2] - N[0][2]];
       let nx = a[1] * b[2] - a[2] * b[1], ny = a[2] * b[0] - a[0] * b[2], nz = a[0] * b[1] - a[1] * b[0];
       const nl = Math.hypot(nx, ny, nz) || 1; nx /= nl; ny /= nl; nz /= nl;
-      const dot = Math.abs(nx * -this.fwd[0] + ny * -this.fwd[1] + nz * -this.fwd[2]);
-      const dot2 = Math.abs(nx * (this.up[0] * 0.5 - this.fwd[0]) + ny * (this.up[1] * 0.5 - this.fwd[1]) + nz * (this.up[2] * 0.5 - this.fwd[2])) / 1.12;
-      const shade = 0.32 + 0.68 * Math.min(1, 0.55 * dot + 0.45 * dot2);
-      const d = pr.reduce((s, q) => s + q[2], 0) / pr.length;
-      prims.push({ t: 'poly', d, pr, c: `rgba(${Math.round(col[0] * shade)},${Math.round(col[1] * shade)},${Math.round(col[2] * shade)},${alpha})` });
+      let shade;
+      if (this.light.mode === 'fixed') {
+        const L = lightDir(this.light.az, this.light.el);
+        const facing = nx * -this.fwd[0] + ny * -this.fwd[1] + nz * -this.fwd[2];
+        const sg = facing < 0 ? -1 : 1;
+        shade = 0.26 + 0.74 * Math.max(0, sg * (nx * L[0] + ny * L[1] + nz * L[2]));
+      } else {
+        const dot = Math.abs(nx * -this.fwd[0] + ny * -this.fwd[1] + nz * -this.fwd[2]);
+        const dot2 = Math.abs(nx * (this.up[0] * 0.5 - this.fwd[0]) + ny * (this.up[1] * 0.5 - this.fwd[1]) + nz * (this.up[2] * 0.5 - this.fwd[2])) / 1.12;
+        shade = 0.32 + 0.68 * Math.min(1, 0.55 * dot + 0.45 * dot2);
+      }
+      const d = pr.reduce((s2, q) => s2 + q[2], 0) / pr.length;
+      const prim = { t: 'poly', d, pr, c: `rgba(${Math.round(col[0] * shade)},${Math.round(col[1] * shade)},${Math.round(col[2] * shade)},${alpha})` };
+      if (this.light.shadows && alpha >= 0.95) prim.nv = N;
+      prims.push(prim);
     }
 
     _surf(prims, p) {
@@ -226,7 +270,7 @@
       const b = this.box, n = this.interacting ? 9 : 20, col = rgb(p.color);
       const px = (i) => b[0] + (b[1] - b[0]) * (i + 0.5) / n, py = (j) => b[2] + (b[3] - b[2]) * (j + 0.5) / n, pz = (k) => b[4] + (b[5] - b[4]) * (k + 0.5) / n;
       for (let k = 0; k < n; k++) for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
-        if (!p.inside(px(i), py(j), pz(k))) continue;
+        if (!this._keep(px(i), py(j), pz(k)) || !p.inside(px(i), py(j), pz(k))) continue;
         const pr = this._proj(this._n(px(i), py(j), pz(k))); if (!pr) continue;
         prims.push({ t: 'splat', d: pr[2], pr, r: this.f * (2 / n) * 0.85 / pr[2], c: `rgba(${col[0]},${col[1]},${col[2]},0.11)` });
       }
@@ -257,7 +301,7 @@
       let last = null;
       for (let i = 0; i <= n; i++) {
         const t = lo + (hi - lo) * i / n, q = p.f(t);
-        if (!q || !q.every(Number.isFinite) || !this._inBox(q[0], q[1], q[2])) { last = null; continue; }
+        if (!q || !q.every(Number.isFinite) || !this._inBox(q[0], q[1], q[2]) || !this._keep(q[0], q[1], q[2])) { last = null; continue; }
         const pr = this._proj(this._n(q[0], q[1], q[2]));
         if (!pr) { last = null; continue; }
         if (last) prims.push({ t: 'seg', d: (last[2] + pr[2]) / 2 - 0.02, a: last, b: pr, c: p.color, w: p.width || 2.5 });
@@ -282,10 +326,12 @@
           else if (p.kind === 'curve3') this._curve(prims, p);
           else if (p.kind === 'pt3') {
             const q = p.get();
-            if (q && q.every(Number.isFinite)) { const pr = this._proj(this._n(q[0], q[1], q[2])); if (pr) prims.push({ t: 'pt', d: pr[2] - 0.05, pr, c: p.color, r: p.size || 6 }); }
+            if (q && q.every(Number.isFinite) && this._keep(q[0], q[1], q[2])) { const pr = this._proj(this._n(q[0], q[1], q[2])); if (pr) prims.push({ t: 'pt', d: pr[2] - 0.05, pr, c: p.color, r: p.size || 6 }); }
           }
         } catch (e) { /* ignore a broken plot */ }
       }
+      if (this.section.on) this._sectionPlane(prims);
+      if (this.light.shadows) this._shadows(ctx, prims);
       prims.sort((a, b) => b.d - a.d);
       ctx.lineJoin = 'round'; ctx.lineCap = 'round';
       for (const q of prims) {
@@ -301,6 +347,40 @@
           ctx.beginPath(); ctx.arc(q.pr[0], q.pr[1], q.r, 0, TAU); ctx.fillStyle = q.c; ctx.fill(); ctx.strokeStyle = T.bg; ctx.lineWidth = 1.5; ctx.stroke();
         }
       }
+    }
+
+    _sectionPlane(prims) {
+      const b = this.box, S = this.section, ax = S.axis, v = S.pos;
+      const lo = [b[0], b[2], b[4]], hi = [b[1], b[3], b[5]];
+      const o = [0, 1, 2].filter((k) => k !== ax), mk = (p, q) => { const c = [0, 0, 0]; c[ax] = v; c[o[0]] = p; c[o[1]] = q; return c; };
+      const C = [mk(lo[o[0]], lo[o[1]]), mk(hi[o[0]], lo[o[1]]), mk(hi[o[0]], hi[o[1]]), mk(lo[o[0]], hi[o[1]])];
+      const pr = C.map((c) => this._proj(this._n(c[0], c[1], c[2]))); if (pr.some((q) => !q)) return;
+      const d = pr.reduce((s2, q) => s2 + q[2], 0) / 4;
+      prims.push({ t: 'poly', d, pr, c: 'rgba(250,126,25,0.10)' });
+      for (let i = 0; i < 4; i++) prims.push({ t: 'seg', d: d - 0.02, a: pr[i], b: pr[(i + 1) % 4], c: 'rgba(250,126,25,0.8)', w: 1.5 });
+    }
+    _shadows(ctx, prims) {
+      const L = lightDir(this.light.az, this.light.el);
+      if (L[2] < 0.08) return;
+      const sc = this._sc || (this._sc = document.createElement('canvas'));
+      if (sc.width !== this.canvas.width || sc.height !== this.canvas.height) { sc.width = this.canvas.width; sc.height = this.canvas.height; }
+      const sx = sc.getContext('2d');
+      sx.setTransform(1, 0, 0, 1, 0, 0); sx.clearRect(0, 0, sc.width, sc.height);
+      sx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0); sx.fillStyle = '#000';
+      let any = false;
+      for (const q of prims) {
+        if (!q.nv) continue;
+        const pts = q.nv.map((n) => this._proj(shadowPoint(n, L)));
+        if (pts.some((p) => !p)) continue;
+        sx.beginPath(); pts.forEach((p, i) => (i ? sx.lineTo(p[0], p[1]) : sx.moveTo(p[0], p[1]))); sx.closePath(); sx.fill(); any = true;
+      }
+      if (!any) return;
+      const F = [[-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1]].map((n) => this._proj(n));
+      if (F.some((p) => !p)) return;
+      ctx.save();
+      ctx.beginPath(); F.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]))); ctx.closePath(); ctx.clip();
+      ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 0.32; ctx.drawImage(sc, 0, 0);
+      ctx.restore();
     }
 
     _line(ctx, a, b) {
@@ -461,5 +541,6 @@
     }
   }
 
+  Graph3D.util = { clipPoly, shadowPoint, lightDir };
   global.Graph3D = Graph3D;
 })(window);

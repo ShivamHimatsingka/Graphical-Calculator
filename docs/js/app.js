@@ -35,7 +35,7 @@
   let lastEd = null;
   let hist = [], hIdx = -1, commitTimer = 0, saveTimer = 0, evalTimer = 0;
 
-  function defaultSettings() { return { app: 'graph', mode: '2d', box: [-5, 5, -5, 5, -5, 5], editor: 'live', grid: true, minor: true, numbers: true, piX: false, deg: false, theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light' }; }
+  function defaultSettings() { return { app: 'graph', mode: '2d', box: [-5, 5, -5, 5, -5, 5], light: { mode: 'head', az: 40, el: 55, shadows: false }, section: { on: false, axis: 2, pos: 0, flip: false }, editor: 'live', grid: true, minor: true, numbers: true, piX: false, deg: false, theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light' }; }
   function newItem(type, props) {
     const it = Object.assign({ id: nextId++, type, text: '', hidden: false, line: 'solid', width: 2.5 }, props || {});
     if (type === 'expr' || type === 'table') {
@@ -1274,7 +1274,15 @@
     const bx = S.box || [-5, 5, -5, 5, -5, 5];
     const windowHtml = is3 ? `<div class="sec"><h4>3D box</h4><div class="range2">
         ${['x', 'y', 'z'].map((a, k) => `<label>${a} min<input type="number" step="any" data-b="${k * 2}" value="${f(bx[k * 2])}"></label><label>${a} max<input type="number" step="any" data-b="${k * 2 + 1}" value="${f(bx[k * 2 + 1])}"></label>`).join('')}</div>
-        <label>Auto-rotate <input type="checkbox" data-spin ${graph3.settings.spin ? 'checked' : ''}></label></div>` : '';
+        <label>Auto-rotate <input type="checkbox" data-spin ${graph3.settings.spin ? 'checked' : ''}></label></div>
+      <div class="sec"><h4>Lighting</h4><div class="seg" data-seg="lmode"><button data-v="head" class="${(S.light || {}).mode === 'fixed' ? '' : 'on'}">Headlight</button><button data-v="fixed" class="${(S.light || {}).mode === 'fixed' ? 'on' : ''}">Fixed light</button></div>
+        <label>Direction <input type="range" min="0" max="360" step="1" data-l="az" value="${(S.light || {}).az ?? 40}"></label>
+        <label>Height <input type="range" min="5" max="90" step="1" data-l="el" value="${(S.light || {}).el ?? 55}"></label>
+        <label>Shadows on the floor <input type="checkbox" data-l="shadows" ${(S.light || {}).shadows ? 'checked' : ''}></label></div>
+      <div class="sec"><h4>Cross-section</h4><label>Cut with a plane <input type="checkbox" data-s="on" ${(S.section || {}).on ? 'checked' : ''}></label>
+        <div class="seg" data-seg="saxis">${['x', 'y', 'z'].map((a, k) => `<button data-v="${k}" class="${((S.section || {}).axis ?? 2) === k ? 'on' : ''}">${a}</button>`).join('')}</div>
+        <label>Position <input type="range" data-s="pos" min="${bx[((S.section || {}).axis ?? 2) * 2]}" max="${bx[((S.section || {}).axis ?? 2) * 2 + 1]}" step="any" value="${(S.section || {}).pos ?? 0}"></label>
+        <label>Keep the other side <input type="checkbox" data-s="flip" ${(S.section || {}).flip ? 'checked' : ''}></label></div>` : '';
     pop.innerHTML = `${windowHtml}
       <div class="sec"${is3 ? ' hidden' : ''}><h4>Window</h4><div class="range2">
         <label>X min<input type="number" step="any" data-r="xmin" value="${f(r.xmin)}"></label><label>X max<input type="number" step="any" data-r="xmax" value="${f(r.xmax)}"></label>
@@ -1288,6 +1296,16 @@
       <div class="sec"><h4>Angle unit</h4><div class="seg" data-seg="ang"><button data-v="rad" class="${S.deg ? '' : 'on'}">Radians</button><button data-v="deg" class="${S.deg ? 'on' : ''}">Degrees</button></div></div>
       <div class="sec"><h4>Theme</h4><div class="seg" data-seg="theme"><button data-v="light" class="${S.theme === 'light' ? 'on' : ''}">Light</button><button data-v="dark" class="${S.theme === 'dark' ? 'on' : ''}">Dark</button></div></div>`;
     place(pop, $('#btnSettings'));
+    pop.querySelectorAll('[data-seg="lmode"] button').forEach((b) => b.onclick = () => { S.light = Object.assign({}, S.light, { mode: b.dataset.v }); pop.querySelectorAll('[data-seg="lmode"] button').forEach((x) => x.classList.toggle('on', x === b)); graph3.setLight(S.light); saveSoon(); });
+    pop.querySelectorAll('[data-l]').forEach((inp) => inp.oninput = () => { const k = inp.dataset.l; S.light = Object.assign({}, S.light, { [k]: inp.type === 'checkbox' ? inp.checked : parseFloat(inp.value) }); graph3.setLight(S.light); saveSoon(); });
+    const secSet = (patch) => { S.section = Object.assign({}, S.section, patch); graph3.setSection(S.section); saveSoon(); };
+    pop.querySelectorAll('[data-s]').forEach((inp) => inp.oninput = () => { const k = inp.dataset.s; secSet({ [k]: inp.type === 'checkbox' ? inp.checked : parseFloat(inp.value) }); });
+    pop.querySelectorAll('[data-seg="saxis"] button').forEach((b) => b.onclick = () => {
+      const ax = +b.dataset.v, box = S.box || [-5, 5, -5, 5, -5, 5], sl = pop.querySelector('[data-s="pos"]');
+      pop.querySelectorAll('[data-seg="saxis"] button').forEach((x) => x.classList.toggle('on', x === b));
+      sl.min = box[ax * 2]; sl.max = box[ax * 2 + 1]; const mid = (box[ax * 2] + box[ax * 2 + 1]) / 2; sl.value = mid;
+      secSet({ axis: ax, pos: mid });
+    });
     pop.querySelectorAll('[data-b]').forEach((inp) => inp.onchange = () => {
       const nb = [0, 1, 2, 3, 4, 5].map((k) => parseFloat(pop.querySelector(`[data-b="${k}"]`).value));
       if (nb.every(Number.isFinite) && nb[1] > nb[0] && nb[3] > nb[2] && nb[5] > nb[4]) { S.box = nb; graph3.setBox(nb); saveSoon(); }
@@ -1313,6 +1331,7 @@
     graph.requestDraw(false);
     Object.assign(graph3.settings, { grid: S.grid, numbers: S.numbers });
     graph3.refreshTheme(); graph3.setBox(S.box || [-5, 5, -5, 5, -5, 5]);
+    graph3.setLight(S.light || {}); graph3.setSection(S.section || {});
     graph3.requestDraw(false);
   }
   function setMode(m) {
@@ -1345,6 +1364,10 @@
     ['Tangent plane to a torus', [{ __mode: '3d' }, '((3+cos(v))cos(u), (3+cos(v))sin(u), sin(v)){0<=u<=2pi, 0<=v<=2pi}', { type: 'note', text: 'Click the torus: a tangent plane is placed at that point (bottom bar). Works for z=f(x,y), parametric and implicit surfaces.' }]],
     ['Tangent plane to a sphere', [{ __mode: '3d' }, 'x^2+y^2+z^2=9', { type: 'note', text: 'Click the sphere to place a tangent plane.' }]],
     ['Geometry: reflection, ellipse, area', [{ __app: 'geometry' }]],
+    ['Geometry: locus of a midpoint', [{ __app: 'geometry', demo: 'locus' }]],
+    ['Geometry: conic intersections', [{ __app: 'geometry', demo: 'conics' }]],
+    ['3D lighting & shadows', [{ __mode: '3d' }, { __light: { mode: 'fixed', az: 215, el: 40, shadows: true } }, { __box: [-4, 4, -4, 4, 0, 4] }, 'x^2+y^2+(z-2.2)^2=1.6', 'z=2.8-(x-1.5)^2/4-(y+1)^2/4{(x-1.5)^2+(y+1)^2<=3}']],
+    ['3D cross-section of a solid', [{ __mode: '3d' }, { __section: { on: true, axis: 1, pos: 0, flip: false } }, 'x^2+y^2+z^2=9', 'z<2-x^2/4-y^2/4']],
     ['3D curve & points', [{ __mode: '3d' }, '(2cos(t), 2sin(t), t/2){-6<=t<=6}', '(0,0,0)', '(2,0,0)']],
     ['3D parametric surface (torus)', [{ __mode: '3d' }, '((3+cos(v))cos(u), (3+cos(v))sin(u), sin(v)){0<=u<=2pi, 0<=v<=2pi}']],
     ['3D implicit surface (sphere)', [{ __mode: '3d' }, 'x^2+y^2+z^2=9']],
@@ -1362,11 +1385,25 @@
     ['Regression from a table', [{ type: 'table', rows: [['1', '2.1'], ['2', '3.9'], ['3', '6.2'], ['4', '7.8'], ['5', '10.1'], ['6', '12.2'], ['', '']] }, 'y_1 ~ m x_1 + b']],
     ['Quadratic regression', [{ type: 'table', rows: [['-3', '10'], ['-2', '4.5'], ['-1', '1.2'], ['0', '-0.5'], ['1', '1.1'], ['2', '4.2'], ['3', '9.8'], ['', '']] }, 'y_1 ~ a x_1^2 + b x_1 + c']],
   ];
-  function loadGeoDemo() {
-    // a ready-made construction: triangle, its reflection, rotation and an ellipse
+  function loadGeoDemo(demo) {
     const d = { objects: [], nextId: 1 };
     const add = (o) => { o.id = d.nextId++; d.objects.push(o); return o.id; };
     const pt = (x, y, name) => add({ t: 'pt', x, y, name });
+    if (demo === 'locus') {
+      const O = pt(0, 0, 'O'), Rr = pt(2, 0, 'R'), circ = add({ t: 'circ', c: O, p: Rr });
+      const Pn = add({ t: 'onp', obj: circ, s: 0.9, name: 'P' }), A = pt(5, 1, 'A'), M = add({ t: 'mid', a: A, b: Pn, name: 'M' });
+      add({ t: 'locus', drv: Pn, tr: M });
+      geo.load(d); geo.setTool('move'); saveSoon(); graph.setRange(-8, 12, -7, 8); return;
+    }
+    if (demo === 'conics') {
+      const F = pt(-3, 0, 'F'), G = pt(3, 0, 'G'), Q = pt(0, 4, 'Q'), ell = add({ t: 'ell', f1: F, f2: G, p: Q });
+      const O = pt(0, 0, 'O'), R2 = pt(4.5, 0, 'R'), circ = add({ t: 'circ', c: O, p: R2 });
+      const L1 = pt(-5, -4, 'U'), L2 = pt(5, 4, 'V'), line = add({ t: 'line', a: L1, b: L2 });
+      for (let k = 0; k < 4; k++) add({ t: 'int', a: circ, b: ell, k, name: 'IJKL'[k] });
+      for (let k = 0; k < 2; k++) add({ t: 'int', a: line, b: ell, k, name: 'ST'[k] });
+      geo.load(d); geo.setTool('move'); saveSoon(); graph.setRange(-10, 10, -6, 9); return;
+    }
+    // a ready-made construction: triangle, its reflection, an ellipse and an area measurement
     const A = pt(-4, -1, 'A'), B = pt(-1, -1, 'B'), C = pt(-3, 1.5, 'C');
     add({ t: 'poly', pts: [A, B, C] });
     const m1 = pt(-2, -3, 'M'), m2 = pt(3, -3, 'N');
@@ -1386,8 +1423,13 @@
     const modeEntry = texts.find((t) => typeof t === 'object' && t.__mode);
     const viewEntry = texts.find((t) => typeof t === 'object' && t.__view);
     const appEntry = texts.find((t) => typeof t === 'object' && t.__app);
-    if (appEntry) { setApp('geometry'); loadGeoDemo(); return; }
-    texts = texts.filter((t) => !(typeof t === 'object' && (t.__mode || t.__view)));
+    if (appEntry) { setApp('geometry'); loadGeoDemo(appEntry.demo); return; }
+    const extras = texts.filter((t) => typeof t === 'object' && (t.__light || t.__section || t.__box));
+    texts = texts.filter((t) => !(typeof t === 'object' && (t.__mode || t.__view || t.__light || t.__section || t.__box)));
+    const S0 = state.settings;
+    S0.light = { mode: 'head', az: 40, el: 55, shadows: false }; S0.section = { on: false, axis: 2, pos: 0, flip: false }; S0.box = [-5, 5, -5, 5, -5, 5];
+    extras.forEach((e) => { if (e.__light) Object.assign(S0.light, e.__light); if (e.__section) Object.assign(S0.section, e.__section); if (e.__box) S0.box = e.__box.slice(); });
+    applySettings();
     let cur = null;
     state.items = texts.map((t) => {
       const it = typeof t === 'string' ? newItem('expr', { text: t }) : newItem(t.type, JSON.parse(JSON.stringify(t)));

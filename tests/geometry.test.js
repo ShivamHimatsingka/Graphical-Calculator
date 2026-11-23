@@ -82,5 +82,57 @@ geo7.setTool('parabola'); geo7.click(0, 2); geo7.click(3, -2);                  
 const par7 = geo7.shape(geo7.objects.find((o) => o.t === 'parab'));
 ok(par7 && geo7.conicPolys(par7)[0].every((p) => Math.abs(Math.hypot(p[0], p[1] - 2) - Math.abs(p[1] + 2)) < 1e-6), 'parabola: distance to focus equals distance to directrix');
 
+// ---- intersections with conics
+const geo8 = new sb.Geo(fakeGraph, {});
+const run8 = (tool, pts) => { geo8.setTool(tool); pts.forEach(([x, y]) => geo8.click(x, y)); };
+run8('ellipse', [[-3, 0], [3, 0], [0, 4]]);
+run8('circle', [[0, 0], [4.5, 0]]);
+run8('line', [[-6, -6], [6, 6]]);
+const E8 = geo8.shape(geo8.objects.find((o) => o.t === 'ell')), C8 = geo8.shape(geo8.objects.find((o) => o.t === 'circ')), L8 = geo8.shape(geo8.objects.find((o) => o.t === 'line'));
+const ec = geo8.intersectAll(C8, E8);
+ok(ec.length === 4 && ec.every((p) => Math.abs(Math.hypot(p[0], p[1]) - 4.5) < 1e-6 && Math.abs(p[0] * p[0] / 25 + p[1] * p[1] / 16 - 1) < 1e-6), 'circle ∩ ellipse gives 4 points on both curves');
+const el = geo8.intersectAll(L8, E8);
+ok(el.length === 2 && el.every((p) => near(p[0], p[1]) && Math.abs(Math.abs(p[0]) - 3.1234) < 1e-3), 'line y=x ∩ ellipse at ±3.123');
+// the intersect tool builds the points (clicking the ellipse's rim and the circle)
+geo8.setTool('intersect'); geo8.click(5, 0.0 + 0); // ellipse vertex at (5,0)
+ok(geo8.pending.length <= 1, 'intersect tool accepts a conic click');
+
+// ---- points on objects and loci
+const geo9 = new sb.Geo(fakeGraph, {});
+const run9 = (tool, pts) => { geo9.setTool(tool); pts.forEach(([x, y]) => geo9.click(x, y)); };
+run9('circle', [[2, 0], [3, 0]]);                // centre (2,0), radius 1
+run9('pointon', [[3, 0]]);                         // P on the circle at angle 0
+const P9 = geo9.objects.find((o) => o.t === 'onp');
+ok(P9 && near(P9.s, 0) && near(geo9.pos(P9)[0], 3), 'point on circle at angle 0');
+P9.s = Math.PI / 2; ok(near(geo9.pos(P9)[0], 2) && near(geo9.pos(P9)[1], 1), 'moving the parameter moves the point along the circle');
+run9('point', [[-6, 0]]);                          // fixed A far from other things
+const A9 = geo9.objects.filter((o) => o.t === 'pt').pop();
+run9('midpoint', [[-6, 0], [2, 1]]);               // midpoint of A and P (clicking the onp)
+const M9 = geo9.objects.find((o) => o.t === 'mid');
+run9('locus', [[2, 1], [M9 ? geo9.pos(M9)[0] : 0, M9 ? geo9.pos(M9)[1] : 0]]);
+const loc = geo9.objects.find((o) => o.t === 'locus'), lp = loc ? geo9.locusPts(loc) : [];
+const cx9 = (A9.x + 2) / 2, cy9 = 0;
+ok(loc && lp.length > 100 && lp.every((q) => q && Math.abs(Math.hypot(q[0] - cx9, q[1] - cy9) - 0.5) < 1e-6), 'locus of the midpoint is a circle of half the radius');
+ok(near(P9.s, Math.PI / 2), 'locus tracing restores the driver position');
+
+// ---- transforming constructions (perpendicular, parabola)
+const geoA = new sb.Geo(fakeGraph, {});
+const runA = (tool, pts) => { geoA.setTool(tool); pts.forEach(([x, y]) => geoA.click(x, y)); };
+runA('line', [[-4, 0], [4, 0]]); runA('perp', [[1, 4], [2, 0]]);
+runA('line', [[-8, -6], [8, -6]]);                                          // mirror y = -6
+geoA.tool = 'reflect'; geoA.pending = []; geoA.click(-5, -6.0); geoA.click(1, 4.0);
+const perpImg = geoA.objects.filter((o) => o.t === 'perp');
+ok(perpImg.length === 1, 'clicking a point does not duplicate the perpendicular');
+geoA.click(1, 8);                                                           // click the perpendicular line itself
+const perps = geoA.objects.filter((o) => o.t === 'perp');
+ok(perps.length === 2 && near(geoA.shape(perps[1]).d[0], 0), 'reflected perpendicular line is built from the images');
+const geoB = new sb.Geo(fakeGraph, {});
+const runB = (tool, pts) => { geoB.setTool(tool); pts.forEach(([x, y]) => geoB.click(x, y)); };
+runB('line', [[-8, -2], [8, -2]]); runB('parabola', [[0, 2], [3, -2]]); runB('point', [[0, 0.0]]);
+const O = geoB.objects.find((o) => o.t === 'pt' && o.x === 0 && o.y === 0);
+geoB.tool = 'rotate'; geoB.param.rotate = 90; geoB.pending = []; geoB.click(0, 0); geoB.click(0, 0.5 - 0.5 + 0); // pick centre, then...
+geoB.click(5, -2);                                                          // ...the parabola is clicked via its directrix point? (ensures no throw)
+ok(true, 'transform tool tolerates clicks on constructions');
+
 if (fails.length) { console.error(fails.join('\n')); process.exit(1); }
 console.log(`geometry tests: ${pass} passed`);

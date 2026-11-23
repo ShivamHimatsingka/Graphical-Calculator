@@ -16,6 +16,7 @@
 </p>
 <p align="center">
   <img src="assets/web-geometry.jpg" width="445" alt="Geometry mode: a triangle, its reflection in a line, an ellipse and an area measurement">
+  <img src="assets/web-3d-section.jpg" width="445" alt="3D cross-section: a sphere and a paraboloid solid cut by a plane">
 </p>
 
 This repository contains two editions:
@@ -32,7 +33,7 @@ This repository contains two editions:
 **Three calculators in one** (☰ menu → *Calculator*)
 
 * **Graphing** — everything below
-* **Geometry** — dynamic constructions: points, segments, lines, rays, circles, midpoints, perpendicular & parallel lines, **angle bisectors**, intersections, polygons, **ellipses, hyperbolas and parabolas** (focus/directrix definitions), angle / distance / **area & perimeter** measurements, and **transformations — reflect, rotate, dilate, translate** (works on points, segments, lines, rays, circles and polygons). Drag any free point and everything built on it follows; undo, delete (with dependants)
+* **Geometry** — dynamic constructions: points, segments, lines, rays, circles, midpoints, perpendicular & parallel lines, **angle bisectors**, intersections, polygons, **ellipses, hyperbolas and parabolas** (focus/directrix definitions), angle / distance / **area & perimeter** measurements, **intersections of lines, circles and conics**, **points on objects** (drag them along a curve) and **loci** (the path of a point as another slides along an object), and **transformations — reflect, rotate, dilate, translate** that carry whole constructions (perpendicular/parallel lines, bisectors, circles, conics, polygons) onto their images. Drag any free point and everything built on it follows; undo, delete (with dependants)
 * **Scientific** — a full-screen scientific calculator: sin/cos/tan & inverses (2nd), logs, powers, roots, factorial, %, EXP, ANS, memory (MC/MR/M+/M−), DEG/RAD, complex and list results, history
 
 **Graph anything**
@@ -42,7 +43,7 @@ This repository contains two editions:
 * Implicit curves, e.g. `x^2 + y^2 = 25`
 * Inequalities with shading, including chains: `y < x^2`, `1 < x < 3`
 * **Complex domain colouring**: type a function of `z` alone — `(z^2-1)/(z^2+1)`, `sin(z)`, `z^3-1` — and the plane is coloured by phase and magnitude
-* **3D graphs** (press the **3D** button): surfaces `z = f(x,y)`, parametric curves `(x(t), y(t), z(t))`, parametric surfaces `(x(u,v), y(u,v), z(u,v))`, implicit surfaces `x^2+y^2+z^2=9`, 3D inequalities (translucent) `z<4-x^2-y^2`, 3D points you can drag (Shift = up/down); **tangent planes for every kind of surface** (click a surface — `z=f(x,y)`, parametric or implicit — to place the plane and see its equation), **volume shading** for 3D inequalities; drag to rotate, wheel/pinch to zoom, adjustable box, auto-rotate
+* **3D graphs** (press the **3D** button): surfaces `z = f(x,y)`, parametric curves `(x(t), y(t), z(t))`, parametric surfaces `(x(u,v), y(u,v), z(u,v))`, implicit surfaces `x^2+y^2+z^2=9`, 3D inequalities (translucent) `z<4-x^2-y^2`, 3D points you can drag (Shift = up/down); **tangent planes for every kind of surface** (click a surface — `z=f(x,y)`, parametric or implicit — to place the plane and see its equation), **volume shading** for 3D inequalities, **lighting** (headlight or a fixed light you aim) with **floor shadows**, and **cross-sections** (cut any solid or surface with an x/y/z plane and see the cut outline); drag to rotate, wheel/pinch to zoom, adjustable box, auto-rotate
 * Points (drag them!) with optional labels, point lists, multi-column tables
 * Piecewise functions `{x<0: -x, x^2}` and domain restrictions `y = x^2 {x > 0}`
 
@@ -168,7 +169,7 @@ Graphical-Calculator/
 ├── desktop/                 # 🖥️ Python/PySide6 edition
 │   ├── main.py
 │   └── requirements.txt
-├── tests/                   # engine, LaTeX converter and geometry tests
+├── tests/                   # engine, LaTeX converter, geometry and 3D-helper tests
 ├── assets/                  # README images
 ├── package.json             # `npm start` / `npm test` helpers
 ├── LICENSE
@@ -206,9 +207,15 @@ Graphical-Calculator/
 - [x] Bar plots, more statistics functions, robust multi-start regression
 - [x] Geometry: transformations (reflect / rotate / dilate / translate), conics, angle bisectors, polygon area
 - [x] 3D: tangent planes for parametric and implicit surfaces, volume shading
-- [ ] Geometry: intersections with conics, transforming perpendicular/parallel lines and conics, loci
-- [ ] 3D: shadows / lighting options, sections of solids
+- [x] Geometry: intersections with conics, transforming every construction, points on objects and loci
+- [x] 3D: lighting options, shadows, cross-sections of solids
 - [x] Geometry constructions are saved in autosave, JSON files and share links
+
+**Known limitations**
+
+* Geometry: conic intersections are found by sampling the visible region (an intersection far outside the view can be missed); measurements and loci can't be transformed; the locus tool needs a point created with **Point on**.
+* 3D: shadows are cast onto the floor of the box by opaque surfaces only (not by curves, points or translucent regions); the renderer is software-based, so very dense scenes are drawn at reduced detail while you rotate.
+* Typed formulas use the live editor's conventions (e.g. `/` builds a fraction); anything it can't convert is still available in plain-text mode.
 
 ---
 
