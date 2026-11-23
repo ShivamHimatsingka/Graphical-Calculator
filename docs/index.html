@@ -19,6 +19,7 @@
           <button data-add="note">Note</button>
           <button data-add="table">Table</button>
           <button data-add="folder">Folder</button>
+          <button data-add="image">Image</button>
         </div>
       </div>
       <button id="btnUndo" class="ib" title="Undo (Ctrl/⌘+Z)" aria-label="Undo"></button>
@@ -56,12 +57,15 @@
       <label><input type="checkbox" id="tTan"> Tangent</label>
       <label><input type="checkbox" id="tSec"> Secant</label>
       <span id="secCtl" hidden>Δx <input type="number" id="tH" value="1" step="0.1" aria-label="Secant spacing"></span>
+      <button id="tAudio" class="ghost" title="Hear the curve: pitch follows the height of y">🔊 Audio trace</button>
       <button id="tAdd" class="ghost" title="Add the line(s) to the expression list">+ Add line</button>
       <div id="toolInfo"></div>
     </div>
     <div class="gctrl">
       <button id="btn3d" class="ib txt" title="Switch to the 3D graph">3D</button>
       <button id="btnSettings" class="ib" title="Graph settings" aria-label="Graph settings"></button>
+      <button id="btnFit" class="ib txt" title="Zoom to fit the graph's features">Fit</button>
+      <button id="btnSquare" class="ib txt" title="Zoom square (equal x and y scale)">1:1</button>
       <button id="btnHome" class="ib" title="Reset view" aria-label="Reset view"></button>
       <button id="btnZoomIn" class="ib" title="Zoom in" aria-label="Zoom in">+</button>
       <button id="btnZoomOut" class="ib" title="Zoom out" aria-label="Zoom out">−</button>
@@ -69,6 +73,8 @@
   </main>
 </div>
 <div id="sci" hidden></div>
+<div id="sci4" hidden></div>
+<div id="mat" hidden></div>
 <div id="pop" class="popover" hidden></div>
 <div id="gset" class="popover" hidden></div>
 <div id="toast" role="status"></div>
@@ -91,6 +97,7 @@ window.mlReady = new Promise(function (resolve) {
 <script src="js/graph3d.js"></script>
 <script src="js/geometry.js"></script>
 <script src="js/scientific.js"></script>
+<script src="js/matrix.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

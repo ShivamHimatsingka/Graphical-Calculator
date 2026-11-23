@@ -16,24 +16,35 @@
     [['0', '0'], ['.', '.'], ['(−)', '-', 'fn'], ['M+', 'm+', 'mem'], ['M−', 'm-', 'mem'], ['=', 'eq', 'eq']],
   ];
 
+  const KEYS_BASIC = [
+    [['AC', 'ac', 'danger'], ['⌫', 'del', 'danger'], ['%', '%', 'fn'], ['÷', '/', 'op']],
+    [['7', '7'], ['8', '8'], ['9', '9'], ['×', '*', 'op']],
+    [['4', '4'], ['5', '5'], ['6', '6'], ['−', '-', 'op']],
+    [['1', '1'], ['2', '2'], ['3', '3'], ['+', '+', 'op']],
+    [['0', '0'], ['.', '.'], ['ANS', 'ans', 'fn'], ['=', 'eq', 'eq']],
+  ];
+
   class Sci {
-    constructor(root, ME) {
+    constructor(root, ME, opts) {
+      this.opts = opts || {};
+      this.storeKey = this.opts.storeKey || 'graphical-calculator-sci';
       this.root = root; this.ME = ME;
       this.deg = false; this.second = false; this.mem = 0; this.hasMem = false; this.ans = 0;
       this.hist = [];
-      try { const d = JSON.parse(localStorage.getItem('graphical-calculator-sci') || 'null'); if (d) { this.hist = d.hist || []; this.mem = d.mem || 0; this.hasMem = !!d.hasMem; this.deg = !!d.deg; if (this.hist.length) this.ans = this.hist[this.hist.length - 1].val; } } catch (e) { /* ignore */ }
+      try { const d = JSON.parse(localStorage.getItem(this.storeKey) || 'null'); if (d) { this.hist = d.hist || []; this.mem = d.mem || 0; this.hasMem = !!d.hasMem; this.deg = !!d.deg; if (this.hist.length) this.ans = this.hist[this.hist.length - 1].val; } } catch (e) { /* ignore */ }
       this._build();
     }
-    _save() { try { localStorage.setItem('graphical-calculator-sci', JSON.stringify({ hist: this.hist.slice(-60), mem: this.mem, hasMem: this.hasMem, deg: this.deg })); } catch (e) { /* ignore */ } }
+    _save() { try { localStorage.setItem(this.storeKey, JSON.stringify({ hist: this.hist.slice(-60), mem: this.mem, hasMem: this.hasMem, deg: this.deg })); } catch (e) { /* ignore */ } }
 
     _build() {
       const r = this.root;
-      r.innerHTML = `<div class="sci-card" role="dialog" aria-label="Scientific calculator">
-        <div class="sci-head"><b>Scientific calculator</b><span class="sci-flags"><span id="sciM" hidden>M</span><span id="sciDeg"></span></span><button class="ib sci-x" aria-label="Close" title="Close">✕</button></div>
+      const basic = !!this.opts.basic, rows = basic ? KEYS_BASIC : KEYS;
+      r.innerHTML = `<div class="sci-card${basic ? ' basic' : ''}" role="dialog" aria-label="${basic ? 'Four-function' : 'Scientific'} calculator">
+        <div class="sci-head"><b>${basic ? 'Four-function calculator' : 'Scientific calculator'}</b><span class="sci-flags"><span id="sciM" hidden>M</span><span id="sciDeg"${basic ? ' hidden' : ''}></span></span><button class="ib sci-x" aria-label="Close" title="Close">✕</button></div>
         <div class="sci-hist" id="sciHist" aria-live="polite"></div>
         <input class="sci-in" id="sciIn" placeholder="0" autocomplete="off" spellcheck="false" inputmode="none" aria-label="Expression">
         <div class="sci-prev" id="sciPrev"></div>
-        <div class="sci-keys">${KEYS.map((row) => row.map((k) => `<button class="sk ${k[2] || ''}" data-k="${k[1]}"${k[3] ? ` data-alt="${k[3]}"` : ''}>${k[0]}</button>`).join('')).join('')}</div>
+        <div class="sci-keys">${rows.map((row) => row.map((k) => `<button class="sk ${k[2] || ''}" data-k="${k[1]}"${k[3] ? ` data-alt="${k[3]}"` : ''}>${k[0]}</button>`).join('')).join('')}</div>
       </div>`;
       this.inp = r.querySelector('#sciIn'); this.prev = r.querySelector('#sciPrev'); this.histEl = r.querySelector('#sciHist');
       this.flagDeg = r.querySelector('#sciDeg'); this.flagM = r.querySelector('#sciM');

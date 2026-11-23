@@ -1,0 +1,32 @@
+/* Matrix calculator logic tests. Run with:  node tests/matrix.test.js */
+const fs = require('fs'), path = require('path'), vm = require('vm');
+const sb = { console, Math, localStorage: { getItem() { return null; }, setItem() {} } };
+sb.window = sb; vm.createContext(sb);
+vm.runInContext(fs.readFileSync(path.join(__dirname, '../docs/js/matrix.js'), 'utf8'), sb);
+const M = sb.MatrixMath;
+let pass = 0; const fails = [];
+const near = (a, b) => Math.abs(a - b) < 1e-8;
+const same = (A, B) => A.length === B.length && A.every((r, i) => r.every((v, j) => near(v, B[i][j])));
+const ok = (c, m) => { if (c) pass++; else fails.push(m); };
+const env = { A: [[1, 2], [3, 4]], B: [[0, 1], [1, 0]], C: [[2, 0, 0], [0, 3, 0], [0, 0, 5]], R: [[0, -1], [1, 0]], S: [[1, 2, 3], [4, 5, 6], [7, 8, 9]] };
+const ev = (t) => M.evaluate(t, env);
+ok(near(ev('det(A)'), -2), 'det [[1,2],[3,4]] = -2');
+ok(same(ev('A*B'), [[2, 1], [4, 3]]), 'A*B');
+ok(same(ev('A+B'), [[1, 3], [4, 4]]) && same(ev('A-B'), [[1, 1], [2, 4]]), 'A±B');
+ok(same(ev('2A'), [[2, 4], [6, 8]]) && same(ev('A*3'), [[3, 6], [9, 12]]), 'scalar multiples');
+ok(same(ev('A^-1'), [[-2, 1], [1.5, -0.5]]) && same(ev('inv(A)'), ev('A^-1')), 'inverse');
+ok(same(M.mul(env.A, ev('A^-1')), M.eye(2)), 'A * A^-1 = I');
+ok(same(ev('A^2'), [[7, 10], [15, 22]]) && same(ev('A^0'), M.eye(2)), 'powers');
+ok(same(ev('transpose(A)'), [[1, 3], [2, 4]]) && same(ev('A^T'), [[1, 3], [2, 4]]), 'transpose');
+ok(ev('trace(A)') === 5 && ev('rank(S)') === 2 && ev('rank(A)') === 2, 'trace and rank (singular 3x3 has rank 2)');
+ok(near(ev('det(S)'), 0), 'det of a singular matrix is 0');
+ok(same(ev('rref(S)'), [[1, 0, -1], [0, 1, 2], [0, 0, 0]]), 'rref of [[1,2,3],[4,5,6],[7,8,9]]');
+ok(same(ev('solve(A, B)'), M.mul(M.inv(env.A), env.B)), 'solve(A,B)');
+ok(same(ev('identity(3)'), M.eye(3)), 'identity');
+const e1 = ev('eig(C)'); ok(e1.map((z) => z.re).join() === '5,3,2', 'eigenvalues of a diagonal matrix');
+const e2 = ev('eig(A)'); ok(near(e2[0].re, 5.3722813232690143) && near(e2[1].re, -0.3722813232690143), 'eigenvalues of [[1,2],[3,4]]');
+const e3 = ev('eig(R)'); ok(e3.length === 2 && near(e3[0].re, 0) && near(Math.abs(e3[0].im), 1), 'rotation matrix has eigenvalues ±i');
+let threw = false; try { ev('A*C'); } catch (e) { threw = /multiply/.test(e.message); } ok(threw, 'size mismatch is reported');
+threw = false; try { ev('inv(S)'); } catch (e) { threw = /singular/.test(e.message); } ok(threw, 'singular inverse is reported');
+if (fails.length) { console.error(fails.join('\n')); process.exit(1); }
+console.log(`matrix tests: ${pass} passed`);

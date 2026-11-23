@@ -34,6 +34,7 @@ This repository contains two editions:
 
 * **Graphing** — everything below
 * **Geometry** — dynamic constructions: points, segments, lines, rays, circles, midpoints, perpendicular & parallel lines, **angle bisectors**, intersections, polygons, **ellipses, hyperbolas and parabolas** (focus/directrix definitions), angle / distance / **area & perimeter** measurements, **intersections of lines, circles and conics**, **points on objects** (drag them along a curve) and **loci** (the path of a point as another slides along an object), and **transformations — reflect, rotate, dilate, translate** that carry whole constructions (perpendicular/parallel lines, bisectors, circles, conics, polygons) onto their images. Drag any free point and everything built on it follows; undo, delete (with dependants)
+* **Four-function** and **Matrix** calculators (matrices A–F up to 8×8; `A*B`, `A^-1`, `det`, `rref`, `rank`, `trace`, `eig`, `solve`, powers, transpose)
 * **Scientific** — a full-screen scientific calculator: sin/cos/tan & inverses (2nd), logs, powers, roots, factorial, %, EXP, ANS, memory (MC/MR/M+/M−), DEG/RAD, complex and list results, history
 
 **Graph anything**
@@ -54,6 +55,9 @@ This repository contains two editions:
 
 **Math engine**
 
+* Point accessors `P.x`, `P.y` (also on lists of points), `distance(P,Q)`, `midpoint(P,Q)`, filled `polygon(…)`
+* Distribution objects `normaldist(μ,σ)`, `tdist(v)`, `binomialdist(n,p)`, `poissondist(λ)`, `uniformdist(a,b)` with `.pdf(x)`, `.cdf(x)`, `.mean`, `.stdev`, `.random(n)`, `.inversecdf(p)`
+* Derivative operator `d/dx` (`ddx(f(x))`), `f'''(x)`, `2+2=` evaluates inline, slider domains `a=2 {0<=a<=5}`
 * Your own functions `f(x) = …`, derivatives `f'(x)`, numeric `int`, `sum`, `prod`, `nderiv`
 * Implicit multiplication (`2x`, `a(x+1)`, `sin 2x`, `sin^2(x)`), `|abs|`, `n!`, `30°`, `log_2(x)`
 * **Complex numbers**: `i`, `3+4i`, `(1+i)^2`, `e^(i*pi)`, `abs`, `arg`, `real`, `imag`, `conj`, and complex `sqrt/exp/ln/sin/cos…` — a complex value plots as a point
@@ -89,6 +93,13 @@ This repository contains two editions:
 * **Tangent and secant lines** at the traced point (adjustable Δx), with their equations — and a one-click *Add line* to put them in your list
 * Zoom (wheel / pinch), pan, scale a single axis by dragging along it, window settings, π-labelled axis
 * Light / dark theme
+
+**Style & settings** (Desmos-style options)
+
+* Line and fill opacity, point style (dot / open / cross), draggable-axis modes (free, x only, y only, fixed), point labels with position and size
+* Polar or no grid, axis names, axis arrows, hide either axis, lock viewport, cursor coordinates on/off
+* **Images** you can place, scale, rotate and fade (every field can use sliders); **Zoom Fit** and **1:1** buttons; hover a row to highlight its curve; paste many lines to create many rows
+* **Audio trace** — hear a curve (pitch follows y); print the graph; full keyboard & mouse shortcut list in the menu
 
 **Workspace**
 
@@ -164,12 +175,13 @@ Graphical-Calculator/
 │       ├── graph.js         #   2D canvas renderer & interaction (marching squares, POIs, tracing, tangents, domain colouring)
 │       ├── graph3d.js       #   3D renderer (projection, shaded meshes, marching tetrahedra, picking & dragging)
 │       ├── geometry.js      #   geometry mode: constructions, transformations, conics, measurements
-│       ├── scientific.js    #   scientific calculator overlay
+│       ├── scientific.js    #   scientific + four-function calculator overlays
+│       ├── matrix.js        #   matrix calculator (pure linear algebra + UI)
 │       └── app.js           #   UI, evaluation pipeline, sliders, tables, folders, regression
 ├── desktop/                 # 🖥️ Python/PySide6 edition
 │   ├── main.py
 │   └── requirements.txt
-├── tests/                   # engine, LaTeX converter, geometry and 3D-helper tests
+├── tests/                   # engine, LaTeX converter, geometry, 3D-helper and matrix tests
 ├── assets/                  # README images
 ├── package.json             # `npm start` / `npm test` helpers
 ├── LICENSE
@@ -210,6 +222,8 @@ Graphical-Calculator/
 - [x] Geometry: intersections with conics, transforming every construction, points on objects and loci
 - [x] 3D: lighting options, shadows, cross-sections of solids
 - [x] Geometry constructions are saved in autosave, JSON files and share links
+
+**Desmos coverage.** Everything in the Desmos *graphing, geometry, 3D, scientific, four-function and matrix* calculators that can run as a static web page is implemented, plus extras (complex numbers, domain colouring, cross-sections, shadows). Deliberately **not** included because they need Desmos' servers or classroom products: user accounts and cloud-saved graphs, the Desmos Classroom / Activity Builder, Test Mode (exam lockdown), mobile apps, translations into other languages, and Braille / screen-reader-specific output (the page uses semantic HTML and keyboard navigation, and has an audio trace).
 
 **Known limitations**
 

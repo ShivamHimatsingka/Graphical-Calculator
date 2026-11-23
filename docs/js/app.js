@@ -6,7 +6,7 @@
   const { V, F, R, fmt } = ME;
   const STORE_KEY = 'graphical-calculator-web-v1';
   const PALETTE = ['#c74440', '#2d70b3', '#388c46', '#6042a6', '#000000', '#fa7e19'];
-  const RESERVED = new Set(['x', 'y', 'r', 'theta']);
+  const RESERVED = new Set(['x', 'y', 'r', 'theta', 'rho', 'phi']);
   const $ = (s, r) => (r || document).querySelector(s);
   const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; };
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -29,18 +29,19 @@
   const recs = new Map();   // id -> evaluation record
   const rows = new Map();   // id -> row dom handles
   const playing = new Set();
-  let graph = null, graph3 = null, geo = null, sci = null;
+  let graph = null, graph3 = null, geo = null, sci = null, sci4 = null, mat = null;
   const activeGraph = () => (state.settings.mode === '3d' ? graph3 : graph);
   let curOrder = [];        // computed variable evaluation order
   let lastEd = null;
   let hist = [], hIdx = -1, commitTimer = 0, saveTimer = 0, evalTimer = 0;
 
-  function defaultSettings() { return { app: 'graph', mode: '2d', box: [-5, 5, -5, 5, -5, 5], light: { mode: 'head', az: 40, el: 55, shadows: false }, section: { on: false, axis: 2, pos: 0, flip: false }, editor: 'live', grid: true, minor: true, numbers: true, piX: false, deg: false, theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light' }; }
+  function defaultSettings() { return { gridType: 'cartesian', showAxisX: true, showAxisY: true, arrows: false, lock: false, cursor: true, axisLabelX: '', axisLabelY: '', app: 'graph', mode: '2d', box: [-5, 5, -5, 5, -5, 5], light: { mode: 'head', az: 40, el: 55, shadows: false }, section: { on: false, axis: 2, pos: 0, flip: false }, editor: 'live', grid: true, minor: true, numbers: true, piX: false, deg: false, theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light' }; }
   function newItem(type, props) {
     const it = Object.assign({ id: nextId++, type, text: '', hidden: false, line: 'solid', width: 2.5 }, props || {});
     if (type === 'expr' || type === 'table') {
       if (!it.color) { it.color = PALETTE[state.colorIdx % PALETTE.length]; state.colorIdx++; }
     }
+    if (type === 'image') { const dft = { src: '', name: '', x: '0', y: '0', w: '6', h: '', angle: '0', opacity: '1' }; for (const k of Object.keys(dft)) if (it[k] === undefined) it[k] = dft[k]; }
     if (type === 'table') { if (!it.rows) it.rows = [['', ''], ['', ''], ['', '']]; it.showLine = !!it.showLine; it.tno = (state.tableCount = (state.tableCount || 0) + 1); }
     return it;
   }
@@ -91,6 +92,7 @@
   /* ================= evaluation ================= */
   function fmtValue(v) {
     if (Array.isArray(v)) return '[' + v.slice(0, 12).map(fmtValue).join(', ') + (v.length > 12 ? `, … (${v.length} items)` : '') + ']';
+    if (v && v.__dist) return { norm: `normaldist(${fmt(v.a)}, ${fmt(v.b)})`, t: `tdist(${fmt(v.a)})`, binom: `binomialdist(${fmt(v.a)}, ${fmt(v.b)})`, pois: `poissondist(${fmt(v.a)})`, unif: `uniformdist(${fmt(v.a)}, ${fmt(v.b)})` }[v.__dist];
     if (v instanceof ME.Pt) return `(${fmt(v.x)}, ${fmt(v.y)})`;
     if (v instanceof ME.Cx) {
       const tiny = (a, b) => Math.abs(a) < 1e-12 * Math.max(1, Math.abs(b));
@@ -234,9 +236,9 @@
       }
       try { rec.stmt = ME.parseStatement(item.text, []); } catch (e) { rec.err = e.message || 'Syntax error'; rec.kind = 'error'; continue; }
       const st = rec.stmt;
-      if (st.ops.length === 1 && st.ops[0] === '=' && !st.restrict.length) {
+      if (st.ops.length === 1 && st.ops[0] === '=') {
         const L = st.parts[0];
-        if (L.t === 'call' && !ME.BUILTINS.has(L.n) && !L.primes && L.args.length && L.args.every((a) => a.t === 'var' && !(a.n in ME.CONSTS)) && !RESERVED.has(L.n) && !(L.n in ME.CONSTS)) {
+        if (L.t === 'call' && !st.restrict.length && !ME.BUILTINS.has(L.n) && !L.primes && L.args.length && L.args.every((a) => a.t === 'var' && !(a.n in ME.CONSTS)) && !RESERVED.has(L.n) && !(L.n in ME.CONSTS)) {
           rec.def = { type: 'fn', name: L.n, params: L.args.map((a) => a.n) };
         } else if (L.t === 'var' && !RESERVED.has(L.n) && !(L.n in ME.CONSTS)) {
           rec.def = { type: 'var', name: L.n };
@@ -282,7 +284,9 @@
       if (lit !== null) {
         rec.isSlider = true; V[name] = lit;
         const sl = rec.item.slider || (rec.item.slider = { min: -10, max: 10, step: 0.01 });
-        if (lit < sl.min) sl.min = Math.floor(lit); if (lit > sl.max) sl.max = Math.ceil(lit);
+        const dom = rec.restrict && rec.restrict.length ? extractRange(rec.restrict, name) : null;
+        if (dom) { const r0 = dom(); if (Number.isFinite(r0.lo)) sl.min = r0.lo; if (Number.isFinite(r0.hi)) sl.max = r0.hi; V[name] = Math.min(Math.max(lit, sl.min), sl.max); rec.domainLocked = true; }
+        else { if (lit < sl.min) sl.min = Math.floor(lit); if (lit > sl.max) sl.max = Math.ceil(lit); }
       }
     }
     // lists: table columns, then list-valued variable definitions (fixpoint)
@@ -322,6 +326,7 @@
     for (const rec of list) {
       const item = rec.item;
       if (item.type === 'table') { plots.push(...tablePlot(item)); continue; }
+      if (item.type === 'image') { if (item.src) imageData.set(item.id, item.src); plots.push(imagePlot(item)); continue; }
       if (item.type === 'expr' && rec.action && !rec.err) { try { buildAction(rec, defined, varDefs, fnNames); } catch (e) { rec.err = e.message || 'Error'; } continue; }
       if (item.type !== 'expr' || rec.err || !rec.parts) continue;
       try { classify(rec, defined, fnDefs, plots); } catch (e) { rec.err = e.message || 'Error'; }
@@ -475,6 +480,59 @@
     return { out, num };
   }
 
+  const imgCache = new Map(), imageData = new Map();
+  function getImg(src) {
+    if (!src) return null;
+    let im = imgCache.get(src);
+    if (!im) { im = new Image(); im.onload = () => graph.requestDraw(false); im.src = src; imgCache.set(src, im); }
+    return im;
+  }
+  function numField(text, dflt) {
+    const t = String(text === undefined ? '' : text).trim();
+    if (!t) return () => dflt;
+    try {
+      const st = ME.parseStatement(t, []);
+      const fn = ME.compile(ME.resolve(st.parts[0], new Set(Object.keys(F))), []);
+      return () => { const v = fn(); return typeof v === 'number' ? v : NaN; };
+    } catch (e) { return () => NaN; }
+  }
+  function imagePlot(item) {
+    const fx = numField(item.x, 0), fy = numField(item.y, 0), fw = numField(item.w, 5), fh = String(item.h || '').trim() ? numField(item.h, NaN) : () => NaN, fa = numField(item.angle, 0), fo = numField(item.opacity, 1);
+    return { id: item.id, kind: 'image', hidden: isHidden(item), img: getImg(item.src), get: () => ({ x: fx(), y: fy(), w: fw(), h: fh(), angle: fa(), opacity: fo(), deg: ME.R.deg }) };
+  }
+  function loadImageFile(file, cb) {
+    const rd = new FileReader();
+    rd.onload = () => {
+      const im = new Image();
+      im.onload = () => {
+        const max = 1000, sc = Math.min(1, max / Math.max(im.naturalWidth, im.naturalHeight));
+        const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(im.naturalWidth * sc)); c.height = Math.max(1, Math.round(im.naturalHeight * sc));
+        c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+        cb(c.toDataURL(/png|gif|webp|svg/.test(file.type) ? 'image/png' : 'image/jpeg', 0.85));
+      };
+      im.onerror = () => toast('Could not read that image');
+      im.src = rd.result;
+    };
+    rd.readAsDataURL(file);
+  }
+  function buildImage(item, row, main) {
+    main.innerHTML = `<div class="imgbox"><div class="imgtop"><label class="imgpick"><input type="file" accept="image/*" hidden><span>${item.src ? 'Change image…' : 'Choose an image…'}</span></label><img class="imgprev" alt="" hidden></div>
+      <div class="imgfields">${[['x', 'center x'], ['y', 'center y'], ['w', 'width'], ['h', 'height (auto)'], ['angle', 'angle'], ['opacity', 'opacity']].map(([k, t]) => `<label>${t}<input data-f="${k}" spellcheck="false" value="${esc(String(item[k] === undefined ? '' : item[k]))}"></label>`).join('')}</div></div><div class="msg"></div>`;
+    row.msg = $('.msg', main);
+    const prev = $('.imgprev', main); if (item.src) { prev.src = item.src; prev.hidden = false; }
+    $('input[type=file]', main).addEventListener('change', (e) => {
+      const f = e.target.files[0]; if (!f) return;
+      loadImageFile(f, (url) => {
+        item.src = url; item.name = f.name; imageData.set(item.id, url); prev.src = url; prev.hidden = false;
+        $('.imgpick span', main).textContent = 'Change image…';
+        if (url.length > 2.5e6) toast('Large image: it may not fit in browser autosave');
+        evaluate(); commitSoon(); saveSoon();
+      });
+      e.target.value = '';
+    });
+    main.querySelectorAll('[data-f]').forEach((inp) => inp.addEventListener('input', () => { item[inp.dataset.f] = inp.value; scheduleEval(); commitSoon(); saveSoon(); }));
+    row.inp = main.querySelector('[data-f]'); row.ed = plainEd(row.inp);
+  }
   function tablePlot(item) {
     const cols = tableCols(item);
     const base = PALETTE.indexOf(item.color);
@@ -493,7 +551,7 @@
     const item = rec.item, P = rec.parts, st = rec.stmt, ops = st.ops;
     const fvOf = (n) => ME.freeVars(n);
     const isVar = (n, name) => n.t === 'var' && n.n === name;
-    const base = () => ({ id: item.id, color: plotColor(item.color), width: item.width, lineStyle: item.line, hidden: isHidden(item) });
+    const base = () => ({ id: item.id, color: plotColor(item.color), width: item.width, lineStyle: item.line, hidden: isHidden(item), opacity: item.opacity, fillAlpha: item.fillOpacity, pstyle: item.pointStyle, labelSize: item.labelSize, labelPos: item.labelPos });
     const needMissing = (nodes, params) => {
       const s = new Set();
       nodes.forEach((n) => ME.freeVars(n).forEach((v) => s.add(v)));
@@ -588,7 +646,11 @@
           const px = ME.compile(e.items[0], []), py = ME.compile(e.items[1], []);
           const dragOK = e.items.every((n) => n.t === 'num' || (n.t === 'neg' && n.a.t === 'num') || (n.t === 'var' && defined.has(n.n) && varIsSlider(n.n)));
           const plot = Object.assign(base(), { kind: 'point', get: () => [px(), py()], cond: mkCond([]), size: 3.5 + item.width * 0.8, label: item.showLabel ? (item.label || 'coords') : null });
-          if (dragOK) plot.drag = (x, y) => dragPoint(item, e.items, x, y);
+          if (dragOK && item.dragMode !== 'none') plot.drag = (x, y) => {
+            const cur = plot.get();
+            if (item.dragMode === 'x' && cur) y = cur[1]; else if (item.dragMode === 'y' && cur) x = cur[0];
+            dragPoint(item, e.items, x, y);
+          };
           plots.push(plot);
         }
         return;
@@ -667,6 +729,39 @@
       else if (isVar(Rr, 'x') && noVar(L, 'x')) { kind = 'fy'; expr = L; }
       else if (isVar(L, 'r') && noVar(Rr, 'r') && !fvOf(Rr).has('x') && !fvOf(Rr).has('y')) { kind = 'polar'; expr = Rr; }
       const zFree = (n) => fvOf(n).has('z') && !defined.has('z');
+      // cylindrical / spherical coordinates:  rho = f(theta, phi),  r = f(z),  z = g(r, theta)
+      const fL0 = fvOf(L), fR0 = fvOf(Rr);
+      const usesSph = (f) => (f.has('rho') && !defined.has('rho')) || (f.has('phi') && !defined.has('phi'));
+      const usesRT = (f) => (f.has('r') && !defined.has('r')) || (f.has('theta') && !defined.has('theta'));
+      if (usesSph(fL0) || usesSph(fR0) || ((zFree(L) || zFree(Rr)) && (usesRT(fL0) || usesRT(fR0)))) {
+        const V_ = (n) => ({ t: 'var', n }), N_ = (v) => ({ t: 'num', v }), B_ = (op, a, b) => ({ t: 'bin', op, a, b }), C_ = (n, args) => ({ t: 'call', n, args, primes: 0 });
+        const sq = (n) => B_('^', V_(n), N_(2));
+        const rcyl = () => C_('sqrt', [B_('+', sq('x'), sq('y'))]), rho = () => C_('sqrt', [B_('+', B_('+', sq('x'), sq('y')), sq('z'))]);
+        const sub = (nd) => {
+          if (nd.t === 'var') {
+            if (nd.n === 'rho' && !defined.has('rho')) return rho();
+            if (nd.n === 'phi' && !defined.has('phi')) return C_('acos', [B_('/', V_('z'), rho())]);
+            if (nd.n === 'r' && !defined.has('r')) return rcyl();
+            if (nd.n === 'theta' && !defined.has('theta')) return C_('atan2', [V_('y'), V_('x')]);
+            return nd;
+          }
+          const c = Object.assign({}, nd);
+          switch (nd.t) {
+            case 'bin': c.a = sub(nd.a); c.b = sub(nd.b); break;
+            case 'neg': case 'fact': c.a = sub(nd.a); break;
+            case 'call': c.args = nd.args.map(sub); break;
+            case 'tuple': case 'list': c.items = nd.items.map(sub); break;
+            case 'rel': c.parts = nd.parts.map(sub); break;
+            case 'pw': c.cases = nd.cases.map((k) => ({ cond: sub(k.cond), val: sub(k.val) })); c.def = nd.def ? sub(nd.def) : nd.def; break;
+            default: break;
+          }
+          return c;
+        };
+        const L3 = sub(L), R3 = sub(Rr);
+        rec.kind = 'isurf'; needMissing([L3, R3], ['x', 'y', 'z']);
+        plots.push(Object.assign(base(), { kind: 'isurf', g: ME.compile({ t: 'bin', op: '-', a: L3, b: R3 }, ['x', 'y', 'z']) }));
+        return;
+      }
       if (!kind && isVar(L, 'z') && noVar(Rr, 'z') && !defined.has('z')) {
         rec.kind = 'surf'; needMissing([Rr].concat(rec.restrict), ['x', 'y']);
         plots.push(Object.assign(base(), { kind: 'surf', f: ME.compile(Rr, ['x', 'y']), cond: mkCond(['x', 'y']) }));
@@ -714,7 +809,7 @@
     }
     rec.kind = 'ineq'; needMissing(allNodes(), ['x', 'y']);
     const tests = ops.map((op, i) => ({ op, g: ME.compile({ t: 'bin', op: '-', a: P[i], b: P[i + 1] }, ['x', 'y']) }));
-    plots.push(Object.assign(base(), { kind: 'ineq', tests, cond: mkCond(['x', 'y']), fillAlpha: 0.26 }));
+    plots.push(Object.assign(base(), { kind: 'ineq', tests, cond: mkCond(['x', 'y']), fillAlpha: item.fillOpacity === undefined ? 0.26 : item.fillOpacity }));
   }
 
   function varIsSlider(name) {
@@ -851,6 +946,8 @@
     } else if (item.type === 'table') {
       row.dot.style.setProperty('--c', item.color);
       row.dot.classList.toggle('off', isHidden(item));
+    } else if (item.type === 'image') {
+      row.dot.style.setProperty('--c', '#7a7a7a'); row.dot.classList.toggle('off', isHidden(item));
     } else if (item.type === 'folder') {
       row.dot.style.setProperty('--c', '#7a7a7a');
       row.dot.classList.toggle('off', !!item.hidden);
@@ -935,6 +1032,8 @@
       row.inp = row.ta; row.ed = plainEd(row.ta);
     } else if (item.type === 'table') {
       buildTable(item, row, main);
+    } else if (item.type === 'image') {
+      buildImage(item, row, main);
     } else if (item.type === 'folder') {
       e.classList.add('is-folder');
       main.innerHTML = '<div class="ftitle"><button class="fold" aria-label="Collapse or expand folder">▾</button><input class="in ftext" type="text" spellcheck="false" placeholder="Folder name"></div>';
@@ -949,6 +1048,8 @@
     $('.gear', e).addEventListener('click', (ev) => openItemPopover(item, ev.currentTarget));
     $('.del', e).addEventListener('click', () => deleteItem(item.id));
     e.addEventListener('focusin', (ev) => { document.querySelectorAll('.row.focus').forEach((r) => r.classList.remove('focus')); e.classList.add('focus'); const t = ev.target; if (row.ed && (t === row.ed.el || (row.ed.el.contains && row.ed.el.contains(t)))) lastEd = row.ed; else if (t && t.matches && t.matches('input:not([type=range]):not([type=checkbox]),textarea')) lastEd = plainEd(t); else if (row.ed) lastEd = row.ed; });
+    e.addEventListener('mouseenter', () => { if (graph && graph.highlightId !== item.id) { graph.highlightId = item.id; graph.requestDraw(false); } });
+    e.addEventListener('mouseleave', () => { if (graph && graph.highlightId === item.id) { graph.highlightId = null; graph.requestDraw(false); } });
     e.addEventListener('focusout', () => setTimeout(() => { if (!e.contains(document.activeElement)) e.classList.remove('focus'); }, 0));
     rows.set(item.id, row);
     return e;
@@ -972,6 +1073,16 @@
         if (state.items[i]) { handled(); focusItem(state.items[i].id); }
       } else if (ev.key === 'Escape') { ed.blur(); }
       else if (math && ev.key === '/' && !ev.ctrlKey && !ev.metaKey && !ev.altKey) { handled(); ed.el.insert('\\frac{#@}{#?}', { selectionMode: 'placeholder', format: 'latex', focus: true }); }
+    }, ed.kind === 'math');
+    row.inp.addEventListener('paste', (ev) => {
+      const txt = (ev.clipboardData && ev.clipboardData.getData('text')) || '';
+      const lines = txt.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+      if (lines.length < 2) return;
+      ev.preventDefault(); if (ed.kind === 'math') ev.stopPropagation();
+      ed.set(lines[0]); item.text = lines[0]; updatePretty(row);
+      let after = item.id;
+      for (const line of lines.slice(1)) { const ni = addItem('expr', after, line); after = ni.id; }
+      toast(`Pasted ${lines.length} expressions`);
     }, ed.kind === 'math');
     row.msg.addEventListener('click', (ev) => {
       if (ev.target.closest('[data-run]')) { runAction(item); return; }
@@ -1151,7 +1262,7 @@
 
   /* ================= history / persistence ================= */
   function snapshot() {
-    return JSON.stringify({ items: state.items, colorIdx: state.colorIdx, tableCount: state.tableCount || 0, deg: state.settings.deg });
+    return JSON.stringify({ items: state.items.map((i) => (i.type === 'image' ? Object.assign({}, i, { src: '' }) : i)), colorIdx: state.colorIdx, tableCount: state.tableCount || 0, deg: state.settings.deg });
   }
   function commitSoon() {
     clearTimeout(commitTimer);
@@ -1165,7 +1276,7 @@
   function updateUndo() { $('#btnUndo').disabled = hIdx <= 0; $('#btnRedo').disabled = hIdx >= hist.length - 1; }
   function restore(s) {
     const d = JSON.parse(s);
-    state.items = d.items; state.colorIdx = d.colorIdx; state.tableCount = d.tableCount; state.settings.deg = !!d.deg;
+    state.items = d.items; state.items.forEach((i) => { if (i.type === 'image' && !i.src) i.src = imageData.get(i.id) || ''; }); state.colorIdx = d.colorIdx; state.tableCount = d.tableCount; state.settings.deg = !!d.deg;
     playing.clear(); renderList(); evaluate(); saveSoon();
   }
   function undo() { clearTimeout(commitTimer); const s = snapshot(); if (hist[hIdx] !== s) { hist = hist.slice(0, hIdx + 1); hist.push(s); hIdx++; } if (hIdx > 0) { hIdx--; restore(hist[hIdx]); updateUndo(); } }
@@ -1198,7 +1309,7 @@
     } catch (e) { return false; }
   }
   function shareLink() {
-    const payload = JSON.stringify({ geo: geo.toJSON(), items: state.items, settings: state.settings, colorIdx: state.colorIdx, tableCount: state.tableCount || 0, view: (() => { const r = graph.range(); return [r.xmin, r.xmax, r.ymin, r.ymax]; })() });
+    const payload = JSON.stringify({ geo: geo.toJSON(), items: state.items.map((i) => (i.type === 'image' ? Object.assign({}, i, { src: '' }) : i)), settings: state.settings, colorIdx: state.colorIdx, tableCount: state.tableCount || 0, view: (() => { const r = graph.range(); return [r.xmin, r.xmax, r.ymin, r.ymax]; })() });
     const bytes = new TextEncoder().encode(payload);
     let bin = ''; bytes.forEach((b) => { bin += String.fromCharCode(b); });
     const b64 = btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -1236,7 +1347,19 @@
       <label>Mode <span class="seg" data-seg="mode">${[['loop', 'Loop'], ['bounce', 'Bounce'], ['once', 'Once']].map(([v, t]) => `<button data-v="${v}" class="${(sl.mode || 'loop') === v ? 'on' : ''}">${t}</button>`).join('')}</span></label>
       <label>Speed <span class="seg" data-seg="speed">${[0.25, 0.5, 1, 2, 4].map((s) => `<button data-v="${s}" class="${(sl.speed || 1) === s ? 'on' : ''}">${s}×</button>`).join('')}</span></label></div>`;
     }
-    if (rec && rec.kind === 'point') html += `<div class="sec"><h4>Label</h4><label>Show label <input type="checkbox" data-showlabel ${item.showLabel ? 'checked' : ''}></label><label>Text <input type="text" data-label value="${esc(item.label || '')}" placeholder="coordinates"></label></div>`;
+    const pk = rec && ['point', 'points'].includes(rec.kind) || (item.type === 'table');
+    if (showStyle && rec && ['fx', 'fy', 'polar', 'param', 'implicit', 'ineq', 'fn', 'point', 'points', 'regression', 'stat'].includes(rec.kind) || item.type === 'table') {
+      html += `<div class="sec"><h4>Opacity</h4><label>Line / point <input type="range" min="0.1" max="1" step="0.05" value="${item.opacity === undefined ? 1 : item.opacity}" data-op></label>`;
+      if (rec && rec.kind === 'ineq') html += `<label>Fill <input type="range" min="0" max="0.9" step="0.02" value="${item.fillOpacity === undefined ? 0.26 : item.fillOpacity}" data-fillop></label>`;
+      html += '</div>';
+    }
+    if (pk) html += `<div class="sec"><h4>Point style</h4><div class="seg" data-seg="pstyle">${[['dot', 'Point'], ['open', 'Open'], ['cross', 'Cross']].map(([v, t]) => `<button data-v="${v}" class="${(item.pointStyle || 'dot') === v ? 'on' : ''}">${t}</button>`).join('')}</div></div>`;
+    if (rec && rec.kind === 'point') {
+      html += `<div class="sec"><h4>Dragging</h4><div class="seg" data-seg="dragmode">${[['both', 'Free'], ['x', 'X only'], ['y', 'Y only'], ['none', 'Fixed']].map(([v, t]) => `<button data-v="${v}" class="${(item.dragMode || 'both') === v ? 'on' : ''}">${t}</button>`).join('')}</div></div>`;
+      html += `<div class="sec"><h4>Label</h4><label>Show label <input type="checkbox" data-showlabel ${item.showLabel ? 'checked' : ''}></label><label>Text <input type="text" data-label value="${esc(item.label || '')}" placeholder="coordinates"></label>
+        <label>Position <select data-lpos>${[['above-right', 'Auto'], ['above', 'Above'], ['below', 'Below'], ['left', 'Left'], ['right', 'Right']].map(([v, t]) => `<option value="${v}" ${(item.labelPos || 'above-right') === v ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+        <label>Size <select data-lsize>${[[11, 'Small'], [13, 'Medium'], [17, 'Large']].map(([v, t]) => `<option value="${v}" ${(item.labelSize || 13) === v ? 'selected' : ''}>${t}</option>`).join('')}</select></label></div>`;
+    }
     if (rec && rec.kind === 'action') html += `<div class="sec"><h4>Ticker</h4><label>Interval (ms) <input type="number" min="16" step="10" data-tickms value="${item.tickMs || 200}"></label></div>`;
     if (rec && rec.isIneq3) html += `<div class="sec"><h4>3D region</h4><label>Volume shading <input type="checkbox" data-vol ${item.noVolume ? '' : 'checked'}></label></div>`;
     if (rec && rec.hasPoints) html += `<div class="sec"><label>Connect points with a line <input type="checkbox" data-line ${item.showLine ? 'checked' : ''}></label></div>`;
@@ -1257,6 +1380,12 @@
     });
     pop.querySelectorAll('[data-seg="speed"] button').forEach((b) => b.onclick = () => { item.slider.speed = parseFloat(b.dataset.v); pop.querySelectorAll('[data-seg="speed"] button').forEach((x) => x.classList.toggle('on', x === b)); saveSoon(); });
     pop.querySelectorAll('[data-seg="mode"] button').forEach((b) => b.onclick = () => { item.slider.mode = b.dataset.v; pop.querySelectorAll('[data-seg="mode"] button').forEach((x) => x.classList.toggle('on', x === b)); saveSoon(); });
+    const opr = pop.querySelector('[data-op]'); if (opr) opr.oninput = () => { item.opacity = parseFloat(opr.value); redraw(); };
+    const fop = pop.querySelector('[data-fillop]'); if (fop) fop.oninput = () => { item.fillOpacity = parseFloat(fop.value); redraw(); };
+    pop.querySelectorAll('[data-seg="pstyle"] button').forEach((b) => b.onclick = () => { item.pointStyle = b.dataset.v; pop.querySelectorAll('[data-seg="pstyle"] button').forEach((x) => x.classList.toggle('on', x === b)); redraw(); });
+    pop.querySelectorAll('[data-seg="dragmode"] button').forEach((b) => b.onclick = () => { item.dragMode = b.dataset.v; pop.querySelectorAll('[data-seg="dragmode"] button').forEach((x) => x.classList.toggle('on', x === b)); redraw(); });
+    const lps = pop.querySelector('[data-lpos]'); if (lps) lps.onchange = () => { item.labelPos = lps.value; redraw(); };
+    const lsz = pop.querySelector('[data-lsize]'); if (lsz) lsz.onchange = () => { item.labelSize = parseInt(lsz.value, 10); redraw(); };
     const sl1 = pop.querySelector('[data-showlabel]'); if (sl1) sl1.onchange = () => { item.showLabel = sl1.checked; redraw(); };
     const sl2 = pop.querySelector('[data-label]'); if (sl2) sl2.oninput = () => { item.label = sl2.value; if (item.showLabel) redraw(); };
     const tk = pop.querySelector('[data-tickms]'); if (tk) tk.onchange = () => { item.tickMs = Math.max(16, parseInt(tk.value, 10) || 200); if (tickers.has(item.id)) { stopTicker(item.id); toggleTicker(item); } saveSoon(); };
@@ -1291,7 +1420,16 @@
         <label>Major gridlines <input type="checkbox" data-t="grid" ${S.grid ? 'checked' : ''}></label>
         <label>Minor gridlines <input type="checkbox" data-t="minor" ${S.minor ? 'checked' : ''}></label>
         <label>Axis numbers <input type="checkbox" data-t="numbers" ${S.numbers ? 'checked' : ''}></label>
-        <label>X-axis in multiples of π <input type="checkbox" data-t="piX" ${S.piX ? 'checked' : ''}></label></div>
+        <label>X-axis in multiples of π <input type="checkbox" data-t="piX" ${S.piX ? 'checked' : ''}></label>
+        <div class="seg" data-seg="gridtype">${[['cartesian', 'Cartesian'], ['polar', 'Polar'], ['none', 'None']].map(([v, t]) => `<button data-v="${v}" class="${(S.gridType || 'cartesian') === v ? 'on' : ''}">${t}</button>`).join('')}</div></div>
+      <div class="sec"${is3 ? ' hidden' : ''}><h4>Axes</h4>
+        <label>Show x-axis <input type="checkbox" data-t="showAxisX" ${S.showAxisX !== false ? 'checked' : ''}></label>
+        <label>Show y-axis <input type="checkbox" data-t="showAxisY" ${S.showAxisY !== false ? 'checked' : ''}></label>
+        <label>Arrows <input type="checkbox" data-t="arrows" ${S.arrows ? 'checked' : ''}></label>
+        <label>x label <input type="text" data-txt="axisLabelX" value="${esc(S.axisLabelX || '')}" placeholder="x"></label>
+        <label>y label <input type="text" data-txt="axisLabelY" value="${esc(S.axisLabelY || '')}" placeholder="y"></label>
+        <label>Lock viewport <input type="checkbox" data-t="lock" ${S.lock ? 'checked' : ''}></label>
+        <label>Cursor coordinates <input type="checkbox" data-t="cursor" ${S.cursor !== false ? 'checked' : ''}></label></div>
       <div class="sec"><h4>Formula editor</h4><div class="seg" data-seg="editor"><button data-v="live" class="${S.editor === 'text' ? '' : 'on'}"${window.__mlOK ? '' : ' disabled title="Unavailable offline"'}>Live (typeset)</button><button data-v="text" class="${S.editor === 'text' ? 'on' : ''}">Plain text</button></div></div>
       <div class="sec"><h4>Angle unit</h4><div class="seg" data-seg="ang"><button data-v="rad" class="${S.deg ? '' : 'on'}">Radians</button><button data-v="deg" class="${S.deg ? 'on' : ''}">Degrees</button></div></div>
       <div class="sec"><h4>Theme</h4><div class="seg" data-seg="theme"><button data-v="light" class="${S.theme === 'light' ? 'on' : ''}">Light</button><button data-v="dark" class="${S.theme === 'dark' ? 'on' : ''}">Dark</button></div></div>`;
@@ -1317,6 +1455,8 @@
       if ([a, b, c, d].every(Number.isFinite) && b > a && d > c) graph.setRange(a, b, c, d);
     });
     pop.querySelectorAll('[data-t]').forEach((inp) => inp.onchange = () => { S[inp.dataset.t] = inp.checked; applySettings(); saveSoon(); });
+    pop.querySelectorAll('[data-txt]').forEach((inp) => inp.oninput = () => { S[inp.dataset.txt] = inp.value; applySettings(); saveSoon(); });
+    pop.querySelectorAll('[data-seg="gridtype"] button').forEach((b) => b.onclick = () => { S.gridType = b.dataset.v; pop.querySelectorAll('[data-seg="gridtype"] button').forEach((x) => x.classList.toggle('on', x === b)); applySettings(); saveSoon(); });
     pop.querySelectorAll('[data-seg="ang"] button').forEach((b) => b.onclick = () => { S.deg = b.dataset.v === 'deg'; pop.querySelectorAll('[data-seg="ang"] button').forEach((x) => x.classList.toggle('on', x === b)); evaluate(); commitSoon(); saveSoon(); });
     pop.querySelectorAll('[data-seg="editor"] button').forEach((b) => b.onclick = () => { if (b.disabled) return; S.editor = b.dataset.v; pop.hidden = true; renderList(); evaluate(); saveSoon(); });
     pop.querySelectorAll('[data-seg="theme"] button').forEach((b) => b.onclick = () => { S.theme = b.dataset.v; pop.querySelectorAll('[data-seg="theme"] button').forEach((x) => x.classList.toggle('on', x === b)); applySettings(); evaluate(); saveSoon(); });
@@ -1326,7 +1466,9 @@
     const S = state.settings;
     document.documentElement.dataset.theme = S.theme;
     const isGeo = S.app === 'geometry';
-    Object.assign(graph.settings, { grid: S.grid, minor: S.minor, numbers: S.numbers && !isGeo, piX: S.piX, axes: !isGeo });
+    Object.assign(graph.settings, { grid: S.grid, minor: S.minor, numbers: S.numbers && !isGeo, piX: S.piX, axes: !isGeo, gridType: S.gridType, showAxisX: S.showAxisX, showAxisY: S.showAxisY, arrows: S.arrows, axisLabelX: S.axisLabelX, axisLabelY: S.axisLabelY });
+    graph.locked = !!S.lock && !isGeo;
+    const cd = $('#coords'); if (cd) cd.dataset.off = S.cursor === false ? '1' : '';
     graph.refreshTheme();
     graph.requestDraw(false);
     Object.assign(graph3.settings, { grid: S.grid, numbers: S.numbers });
@@ -1342,6 +1484,7 @@
     $('#coords').style.display = is3 ? 'none' : ''; $('#tip').style.display = 'none';
     if (is3) $('#curvebar').hidden = true;
     else { const p = graph.plots.find((q) => q.id === graph.selectedId); $('#curvebar').hidden = !(p && p.kind === 'fx'); }
+    $('#btnFit').style.display = is3 ? 'none' : ''; $('#btnSquare').style.display = is3 ? 'none' : '';
     const b = $('#btn3d'); b.textContent = is3 ? '2D' : '3D'; b.title = is3 ? 'Back to the 2D graph' : 'Switch to the 3D graph'; b.classList.toggle('on', is3);
     if (is3) { graph3.resize(); graph3.requestDraw(false); } else { graph.resize(); graph.requestDraw(false); }
     applyPlane(); updateAllRows(); saveSoon();
@@ -1376,6 +1519,11 @@
     ['Bar plot & statistics', ['V=[3,5,2,6,4]', 'barplot(V)', 'mean(V)', 'mode([1,2,2,3])', 'percentile([1...11],0.9)', 'cumsum(V)']],
     ['Histogram / box plot / dot plot', ['L=[2,3,3,4,4,4,5,5,6,8,9]', 'histogram(L,1)', 'boxplot(L)', 'dotplot(L)']],
     ['List comprehension', ['P=[(n, n^2/5) for n=[-5...5]]', 'S=[n^2 for n=[1...6]]', 'total(S)']],
+    ['Distribution objects', ['D=normaldist(0,1)', 'y=D.pdf(x)', 'D.cdf(1.96)', 'D.inversecdf(0.975)', 'T=tdist(4)', 'y=T.pdf(x)', 'B=binomialdist(10,0.4)', 'B.mean', 'B.pdf(4)']],
+    ['Points, polygon & .x/.y', ['P=(1,2)', 'P.x+P.y', 'Q=[(1,1),(3,1),(2,3)]', 'Q.x', 'polygon(Q)', 'distance((1,1),(3,1))', 'midpoint((1,1),(3,1))']],
+    ['Derivative operator', ['f(x)=x^3-3x', 'y=f(x)', 'y=ddx(f(x))', 'y=f\'\'(x)']],
+    ['Slider with a domain', ['a=2 {0<=a<=5}', 'y=a x^2', { type: 'note', text: 'The restriction on a=… limits the slider range (0 to 5 here).' }]],
+    ['3D spherical & cylindrical', [{ __mode: '3d' }, 'rho=2+0.5*sin(5*theta)*sin(3*phi)', 'r=1+0.35*sin(3*z)']],
     ['Folders', [{ type: 'folder', text: 'Circle' }, 'x^2+y^2=4', '(0,0)', { type: 'folder', text: 'Parabola' }, 'y=x^2-2', 'y=-x^2+2']],
     ['Random & distributions', ['y=normpdf(x)', 'y=normpdf(x,1.5,0.6)', 'normcdf(1.96)', 'binompdf(10,0.5,5)', 'invnorm(0.975)', 'R=random(6)', 'shuffle([1...6])']],
     ['Many curves from a list', ['L=[1...5]', 'y=L sin(x)/2']],
@@ -1447,11 +1595,12 @@
   function buildMainMenu() {
     const m = $('#mainMenu');
     m.innerHTML = `<div class="lbl">Calculator</div>
-      <button data-app="graph">Graphing calculator</button><button data-app="geometry">Geometry</button><button data-app="scientific">Scientific calculator</button><hr>
+      <button data-app="graph">Graphing calculator</button><button data-app="geometry">Geometry</button><button data-app="scientific">Scientific calculator</button><button data-app="basic">Four-function calculator</button><button data-app="matrix">Matrix calculator</button><hr>
       <div class="lbl">Graph</div>
       <button data-m="new">New graph</button><button data-m="open">Open file…</button><button data-m="save">Save to file</button>
       <button data-m="png">Export image (PNG)</button><button data-m="link">Copy share link</button><hr>
       <div class="lbl">Examples</div>${EXAMPLES.map((e, i) => `<button data-ex="${i}">${esc(e[0])}</button>`).join('')}<hr>
+      <button data-m="keys">Keyboard shortcuts</button><button data-m="print">Print the graph</button>
       <button data-m="help">Help &amp; syntax</button>`;
     m.onclick = (ev) => {
       const b = ev.target.closest('button'); if (!b) return;
@@ -1468,6 +1617,8 @@
         case 'png': activeGraph().exportPNG((blob) => { download(blob, 'graph.png'); toast('Exported graph.png'); }); break;
         case 'link': copyText(shareLink()).then(() => toast('Share link copied')).catch(() => toast('Could not copy link')); break;
         case 'help': showHelp(); break;
+        case 'keys': showShortcuts(); break;
+        case 'print': window.print(); break;
         default: break;
       }
     };
@@ -1478,7 +1629,7 @@
   function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 1800); }
 
   function showHelp() {
-    const it = newItem('note', { text: 'Syntax cheat-sheet\n• y = x^2, x = y^2, r = 2 sin(3θ)\n• Implicit: x^2 + y^2 = 4   Inequality: y < sin(x), 1 < x < 3\n• Parametric: (cos(t), sin(t)){0<=t<=2π}\n• Points: (1, 2) — drag them!\n• Functions: f(x) = x^2, then f(3) or f\'(x)\n• Sliders: type a new letter (a x) and click “add slider”\n• Restrict a domain: y = x^2 {x > 0}   Piecewise: y = {x<0: -x, x}\n• Lists: L=[1...10], [2,4...20], L^2, L[3], L[L>5], (L, L^2)\n• Stats: mean, median, total, stdev, variance, quartile, corr, cov, sort, join, unique, count\n• Tables make lists x_1, y_1 — fit with  y_1 ~ m x_1 + b  (any model, e.g. a*e^(b x_1))\n• sum(n,1,10,n^2)   int(0,1,x^2)   abs, sqrt, ln, log, nCr, floor …\n• Folders: + → Folder, then drag rows (grip = the number column) to reorder or move into folders\n• random(), random(5), shuffle(L), normpdf/normcdf/invnorm, binompdf/binomcdf, poissonpdf/poissoncdf\n• Residuals after a regression: e_1 → (x_1, e_1)\n• 3D: z = sin(x)cos(y)  ·  (cos t, sin t, t/3)  ·  (x(u,v), y(u,v), z(u,v))  ·  x^2+y^2+z^2=9  ·  (1,2,3)   — drag to rotate, wheel to zoom\n• Domain colouring: type a function of z alone, e.g. (z^2-1)/(z^2+1) or sin(z)\n• Actions: n → n+1 (Run button or Ticker); several with commas: n → n+1, m → 0\n• Stats plots: histogram(L,1), boxplot(L), dotplot(L)   ·   List comprehension: [n^2 for n=[1...5]]\n• Modes (☰ menu): Graphing · Geometry (points, lines, circles, perpendicular/parallel, intersections, polygons, angles, distances) · Scientific calculator\n• 3D: click a surface to place a tangent plane; inequalities like z<4-x^2-y^2 are drawn translucent; drag 3D points (Shift = up/down)\n• Regression fits any model with several restarts: y_1 ~ L/(1+e^(-k(x_1-m)))\n• Complex numbers: i, 3+4i, abs(z), arg(z), conj(z), e^(i*pi); a complex value plots as a point\n• Click a curve for tangent & secant lines (bar at the bottom), zeros, extrema & intersections' });
+    const it = newItem('note', { text: 'Syntax cheat-sheet\n• y = x^2, x = y^2, r = 2 sin(3θ)\n• Implicit: x^2 + y^2 = 4   Inequality: y < sin(x), 1 < x < 3\n• Parametric: (cos(t), sin(t)){0<=t<=2π}\n• Points: (1, 2) — drag them!\n• Functions: f(x) = x^2, then f(3) or f\'(x)\n• Sliders: type a new letter (a x) and click “add slider”\n• Restrict a domain: y = x^2 {x > 0}   Piecewise: y = {x<0: -x, x}\n• Lists: L=[1...10], [2,4...20], L^2, L[3], L[L>5], (L, L^2)\n• Stats: mean, median, total, stdev, variance, quartile, corr, cov, sort, join, unique, count\n• Tables make lists x_1, y_1 — fit with  y_1 ~ m x_1 + b  (any model, e.g. a*e^(b x_1))\n• sum(n,1,10,n^2)   int(0,1,x^2)   abs, sqrt, ln, log, nCr, floor …\n• Folders: + → Folder, then drag rows (grip = the number column) to reorder or move into folders\n• random(), random(5), shuffle(L), normpdf/normcdf/invnorm, binompdf/binomcdf, poissonpdf/poissoncdf\n• Residuals after a regression: e_1 → (x_1, e_1)\n• 3D: z = sin(x)cos(y)  ·  (cos t, sin t, t/3)  ·  (x(u,v), y(u,v), z(u,v))  ·  x^2+y^2+z^2=9  ·  (1,2,3)   — drag to rotate, wheel to zoom\n• Domain colouring: type a function of z alone, e.g. (z^2-1)/(z^2+1) or sin(z)\n• Actions: n → n+1 (Run button or Ticker); several with commas: n → n+1, m → 0\n• Stats plots: histogram(L,1), boxplot(L), dotplot(L)   ·   List comprehension: [n^2 for n=[1...5]]\n• Modes (☰ menu): Graphing · Geometry (points, lines, circles, perpendicular/parallel, intersections, polygons, angles, distances) · Scientific calculator\n• 3D: click a surface to place a tangent plane; inequalities like z<4-x^2-y^2 are drawn translucent; drag 3D points (Shift = up/down)\n• Regression fits any model with several restarts: y_1 ~ L/(1+e^(-k(x_1-m)))\n• Points & objects: P.x, P.y (also on lists), distance(P,Q), midpoint(P,Q), polygon(P1,P2,P3) or polygon(L)\n• Distributions: D=normaldist(0,1), tdist(v), binomialdist(n,p), poissondist(l), uniformdist(a,b) → D.pdf(x), D.cdf(x), D.mean, D.stdev, D.random(10), D.inversecdf(p)\n• Derivative operator: ddx(f(x)) or type d/dx f(x) in the live editor. Slider domain: a=2 {0<=a<=5}.  2+2= evaluates.\n• 3D coordinates: rho=2+sin(5θ)sin(3φ) (spherical), r=1+sin(3z) (cylindrical)\n• Images: + → Image (position, size, angle, opacity may use sliders).  Settings: polar grid, axis labels/arrows, lock viewport\n• Zoom Fit / 1:1 buttons, hover a row to highlight its curve, paste many lines to create many rows, 🔊 audio trace on a selected curve\n• Complex numbers: i, 3+4i, abs(z), arg(z), conj(z), e^(i*pi); a complex value plots as a point\n• Click a curve for tangent & secant lines (bar at the bottom), zeros, extrema & intersections' });
     state.items.unshift(it); $('#list').insertBefore(createRow(it), $('#list').firstChild); evaluate(); commitSoon(); saveSoon();
     $('#list').scrollTop = 0;
   }
@@ -1565,6 +1716,81 @@
     list.addEventListener('dragend', () => { dragId = null; clear(); });
   }
 
+  /* ================= view helpers, audio trace, shortcuts ================= */
+  function fitView() {
+    const pts = [];
+    const push = (x, y) => { if (Number.isFinite(x) && Number.isFinite(y) && Math.abs(x) < 1e6 && Math.abs(y) < 1e6) pts.push([x, y]); };
+    for (const p of graph.plots) {
+      if (p.hidden) continue;
+      try {
+        switch (p.kind) {
+          case 'point': { const q = p.get(); if (q) push(q[0], q[1]); break; }
+          case 'points': { const v = p.get(); (Array.isArray(v) ? v : [v]).forEach((q) => { if (q) { if (q.re !== undefined) push(q.re, q.im); else push(q.x, q.y); } }); break; }
+          case 'table': p.points.forEach((q) => push(q[0], q[1])); break;
+          case 'param': { const rg = p.range ? p.range() : { lo: 0, hi: 1 }, lo = Number.isFinite(rg.lo) ? rg.lo : 0, hi = Number.isFinite(rg.hi) ? rg.hi : 1; for (let i = 0; i <= 160; i++) { const q = p.f(lo + (hi - lo) * i / 160); if (q) push(q[0], q[1]); } break; }
+          case 'polar': { const rg = p.range ? p.range() : { lo: 0, hi: 6 * Math.PI }, lo = Number.isFinite(rg.lo) ? rg.lo : 0, hi = Number.isFinite(rg.hi) ? rg.hi : 6 * Math.PI; for (let i = 0; i <= 360; i++) { const th = lo + (hi - lo) * i / 360, r = p.f(th); push(r * Math.cos(th), r * Math.sin(th)); } break; }
+          case 'fx': {
+            // look for zeros, extrema and the y-intercept near the origin first, then further out
+            for (const span of [12, 100]) {
+              const N = 2400, xs = [], ys = [], found = [];
+              for (let i = 0; i <= N; i++) { const x = -span + 2 * span * i / N, y = p.f(x); xs.push(x); ys.push(Number.isFinite(y) ? y : NaN); }
+              for (let i = 1; i < N; i++) {
+                const a = ys[i - 1], b = ys[i], c = ys[i + 1];
+                if (Number.isFinite(a) && Number.isFinite(b) && a * b < 0) found.push([xs[i - 1] + (xs[i] - xs[i - 1]) * a / (a - b), 0]);
+                if (Number.isFinite(a) && Number.isFinite(b) && Number.isFinite(c) && (b - a) * (c - b) < 0 && Math.abs(b) < 1e4) found.push([xs[i], b]);
+              }
+              const y0 = p.f(0); if (Number.isFinite(y0)) found.push([0, y0]);
+              if (found.length >= 2 || span === 100) { found.forEach((q) => push(q[0], q[1])); if (found.length < 2) { push(-5, p.f(-5)); push(5, p.f(5)); } break; }
+            }
+            break;
+          }
+          default: break;
+        }
+      } catch (e) { /* skip plot */ }
+    }
+    if (!pts.length) { graph.resetView(); return; }
+    let x0 = Math.min(...pts.map((q) => q[0])), x1 = Math.max(...pts.map((q) => q[0])), y0 = Math.min(...pts.map((q) => q[1])), y1 = Math.max(...pts.map((q) => q[1]));
+    const grow = (lo, hi, minSpan) => { const span = Math.max(hi - lo, minSpan), mid = (lo + hi) / 2; return [mid - span * 0.6, mid + span * 0.6]; };
+    [x0, x1] = grow(x0, x1, 2); [y0, y1] = grow(y0, y1, 2);
+    graph.setRange(x0, x1, y0, y1);
+  }
+  let audioCtx = null;
+  function audioTrace() {
+    const p = graph.selectedPlot();
+    if (!p || p.kind !== 'fx') { toast('Click a y = f(x) curve first'); return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) { toast('Audio is not available in this browser'); return; }
+    audioCtx = audioCtx || new AC(); if (audioCtx.state === 'suspended') audioCtx.resume();
+    const r = graph.range(), N = 160, dur = 4, xs = [], ys = [];
+    for (let i = 0; i <= N; i++) { const x = r.xmin + (r.xmax - r.xmin) * i / N, y = p.f(x); xs.push(x); ys.push(Number.isFinite(y) ? y : NaN); }
+    const fin = ys.filter(Number.isFinite); if (fin.length < 2) { toast('Nothing to play in this window'); return; }
+    const lo = Math.min(...fin), hi = Math.max(...fin), t0 = audioCtx.currentTime + 0.05;
+    const osc = audioCtx.createOscillator(), gain = audioCtx.createGain(); osc.type = 'sine'; osc.connect(gain); gain.connect(audioCtx.destination);
+    gain.gain.setValueAtTime(0.0001, t0);
+    ys.forEach((y, i) => {
+      const t = t0 + dur * i / N;
+      if (Number.isFinite(y)) { osc.frequency.setValueAtTime(220 * Math.pow(2, 3 * (hi > lo ? (y - lo) / (hi - lo) : 0.5)), t); gain.gain.linearRampToValueAtTime(0.18, t + 0.01); }
+      else gain.gain.linearRampToValueAtTime(0.0001, t + 0.01);
+    });
+    gain.gain.linearRampToValueAtTime(0.0001, t0 + dur + 0.05);
+    osc.start(t0); osc.stop(t0 + dur + 0.1);
+    for (let i = 0; i <= N; i += 2) setTimeout(() => { if (Number.isFinite(ys[i])) { graph.trace = { x: xs[i], y: ys[i] }; graph.drawOverlay(); } }, 50 + dur * 1000 * i / N);
+    toast('Audio trace: higher pitch = higher y');
+  }
+  function showShortcuts() {
+    let m = $('#kbdModal');
+    if (!m) { m = el('div', 'modal'); m.id = 'kbdModal'; document.body.appendChild(m); m.addEventListener('click', (e) => { if (e.target === m || e.target.closest('.modal-x')) m.hidden = true; }); }
+    const rows = [
+      ['Enter', 'New expression below'], ['Backspace (empty row)', 'Delete the row'], ['↑ / ↓', 'Move between rows'], ['Esc', 'Leave the field / close menus'],
+      ['Ctrl/⌘ + Z · Shift + Ctrl/⌘ + Z', 'Undo · redo'], ['/', 'Build a fraction (live editor)'], ['^  _', 'Superscript · subscript (live editor)'],
+      ['Mouse wheel · pinch', 'Zoom'], ['Shift + wheel · Alt + wheel', 'Zoom x only · y only'], ['Drag the axis', 'Scale one axis'], ['Double-click', 'Zoom in (graph) · reset view (3D)'],
+      ['Click a curve', 'Zeros, extrema, intersections, tangent / secant, audio trace'], ['Click a surface (3D)', 'Place a tangent plane'], ['Shift + drag a 3D point', 'Move it up / down'],
+      ['Hover a row', 'Highlights its curve'], ['Paste several lines', 'Creates one expression per line'],
+    ];
+    m.innerHTML = `<div class="modal-card"><div class="modal-head"><b>Keyboard &amp; mouse shortcuts</b><button class="ib modal-x" aria-label="Close">✕</button></div><table class="kbdtbl">${rows.map(([k, d]) => `<tr><td><kbd>${esc(k)}</kbd></td><td>${esc(d)}</td></tr>`).join('')}</table></div>`;
+    m.hidden = false;
+  }
+
   /* ================= calculator modes ================= */
   function buildGeoBar() {
     const bar = $('#geobar');
@@ -1588,6 +1814,8 @@
   function setApp(name) {
     const S = state.settings;
     if (name === 'scientific') { ME.R.deg = false; sci.open(); return; }
+    if (name === 'basic') { ME.R.deg = false; sci4.open(); return; }
+    if (name === 'matrix') { mat.open(); return; }
     if (name === S.app) return;
     const body = document.body;
     if (name === 'geometry') {
@@ -1644,6 +1872,8 @@
     geo = new Geo(graph, { onChange: () => saveSoon(), onTool: (t, st) => geoToolChanged(t, st), toast });
     if (state.geo) geo.load(state.geo);
     sci = new Sci($('#sci'), ME); sci.onClose = () => { ME.R.deg = !!state.settings.deg; };
+    sci4 = new Sci($('#sci4'), ME, { basic: true, storeKey: 'graphical-calculator-basic' }); sci4.onClose = () => { ME.R.deg = !!state.settings.deg; };
+    mat = new Mat($('#mat'), evalNumberText, (v) => ME.fmt(v, 8));
     graph.resize();
     if (state.view && state.view.length === 4 && state.view.every(Number.isFinite)) graph.setRange(state.view[0], state.view[1], state.view[2], state.view[3]);
     else graph.resetView();
@@ -1666,6 +1896,8 @@
     $('#btnHome').onclick = () => activeGraph().resetView();
     $('#btnZoomIn').onclick = () => (state.settings.mode === '3d' ? graph3.zoom(1.25) : graph.zoomAt(graph.w / 2, graph.h / 2, 1.3, 1.3));
     $('#btnZoomOut').onclick = () => (state.settings.mode === '3d' ? graph3.zoom(1 / 1.25) : graph.zoomAt(graph.w / 2, graph.h / 2, 1 / 1.3, 1 / 1.3));
+    $('#btnFit').onclick = fitView; $('#btnSquare').onclick = () => graph.squareView();
+    $('#tAudio').onclick = audioTrace;
     $('#btn3d').onclick = () => setMode(state.settings.mode === '3d' ? '2d' : '3d');
     $('#btnSettings').onclick = (e) => { e.stopPropagation(); const wasHidden = $('#gset').hidden; closePopovers(); if (wasHidden) openGraphSettings(); };
     $('#fileIn').onchange = (e) => {
@@ -1725,7 +1957,7 @@
       closePopovers();
     });
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') closePopovers();
+      if (e.key === 'Escape') { closePopovers(); const km = $('#kbdModal'); if (km) km.hidden = true; }
       const tag = (e.target.tagName || '').toLowerCase();
       if ((e.ctrlKey || e.metaKey) && tag !== 'input' && tag !== 'textarea') {
         if (e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
@@ -1753,7 +1985,7 @@
       window.__mlOK = !!(window.mlReady && await Promise.race([window.mlReady, timeout]));
     } catch (e) { window.__mlOK = false; }
     if (window.__mlOK) configureMathLive();
-    if (typeof Graph === 'undefined' || typeof Graph3D === 'undefined' || typeof Geo === 'undefined' || typeof Sci === 'undefined' || typeof LX === 'undefined') {
+    if (typeof Graph === 'undefined' || typeof Graph3D === 'undefined' || typeof Geo === 'undefined' || typeof Sci === 'undefined' || typeof Mat === 'undefined' || typeof LX === 'undefined') {
       document.body.insertAdjacentHTML('afterbegin', '<div style="position:fixed;inset:0;z-index:999;display:flex;align-items:center;justify-content:center;background:#fff;color:#222;font:16px sans-serif;text-align:center;padding:24px">Some files failed to load (network problem?).<br>Please <a href="" onclick="location.reload();return false">reload the page</a>.</div>');
       return;
     }

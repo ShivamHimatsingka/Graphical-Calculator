@@ -84,6 +84,16 @@ cxFn('z^2-1', -2, 0, new ME.Cx(0, 1)); cxFn('1/(z^2+1)', 0.2, 0, new ME.Cx(2, 0)
 check('mode([1,2,2,3])', 2); check('percentile([1...11],0.9)', 10); check('cumsum([1,2,3])', [1, 3, 6]); check('diff([1,4,9])', [3, 5]); check('reverse([1,2,3])', [3, 2, 1]);
 { const b = value('barplot([3,5,2],0.5)'); if (b && b.__plot === 'bar' && b.data.length === 3 && b.w === 0.5) pass++; else fails.push('barplot marker'); }
 
+// point members, distributions, polygon, derivative operator, trailing '='
+check('(1,2).x', 1); check('(1,2).y', 2); check('[(1,2),(3,4)].y', [2, 4]); check('distance((0,0),(3,4))', 5); check('midpoint((0,0),(2,2)).x', 1);
+check('normaldist(0,1).pdf(0)', 0.3989422804014327); check('normaldist(0,1).cdf(1.96)', 0.9750021048517795); check('normaldist(5,2).mean', 5); check('normaldist(0,1).inversecdf(0.975)', 1.959963984540054);
+check('tdist(5).cdf(2.015048)', 0.95); check('tpdf(0,10)', 0.3891083839660311); check('tdist(10).stdev', Math.sqrt(10 / 8));
+check('binomialdist(10,0.5).mean', 5); check('binomialdist(10,0.5).pdf(5)', 252 / 1024); check('poissondist(4).stdev', 2); check('uniformdist(0,10).cdf(2.5)', 0.25);
+check('count(normaldist(0,1).random(5))', 5); check('quantile([1...11],0.5)', 6); check('var([2,4,4,4,5,5,7,9])', 32 / 7); check('sech(0)', 1);
+{ const w = value('polygon((0,0),(1,0),(0,1))'); if (w && w.__plot === 'polygon' && w.pts.length === 3) pass++; else fails.push('polygon marker'); }
+{ const st = ME.parseStatement('2+2=', []); if (st.ops.length === 0 && st.parts.length === 1) pass++; else fails.push('trailing = evaluates'); }
+{ const f = ME.compile(ME.resolve(ME.parseStatement('ddx(x^2)', []).parts[0], new Set()), ['x']); if (near(f(3), 6)) pass++; else fails.push('ddx(x^2) at 3 should be 6, got ' + f(3)); }
+
 // parser errors
 for (const bad of ['2+', '(1', 'sin(', '1 $ 2']) {
   try { ME.parseStatement(bad, []); fails.push(`"${bad}" should not parse`); } catch (e) { pass++; }

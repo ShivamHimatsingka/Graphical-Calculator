@@ -99,6 +99,7 @@
       if (order === 1) return (fn(x + h, ...rest) - fn(x - h, ...rest)) / (2 * h);
       const h2 = 1e-3 * Math.max(1, Math.abs(x));
       if (order === 2) return (fn(x + h2, ...rest) - 2 * fn(x, ...rest) + fn(x - h2, ...rest)) / (h2 * h2);
+      if (order === 3) { const h3 = 5e-3 * Math.max(1, Math.abs(x)); return (fn(x + 2 * h3, ...rest) - 2 * fn(x + h3, ...rest) + 2 * fn(x - h3, ...rest) - fn(x - 2 * h3, ...rest)) / (2 * h3 ** 3); }
       return NaN;
     },
   });
@@ -284,8 +285,87 @@
     reverse: (L) => (isA(L) ? L.slice().reverse() : L),
     skewness: (...a) => { const v = flatNums(a), m = meanOf(v), sd = Math.sqrt(varOf(v, 0)); return v.length ? v.reduce((s2, x) => s2 + ((x - m) / sd) ** 3, 0) / v.length : NaN; },
   });
+  /* ---- distribution objects, point helpers, polygon ---- */
+  function betacf(a, b, x) {
+    const MAXIT = 200, EPS = 3e-14, FPMIN = 1e-300;
+    const qab = a + b, qap = a + 1, qam = a - 1;
+    let c = 1, d = 1 - qab * x / qap;
+    if (Math.abs(d) < FPMIN) d = FPMIN; d = 1 / d; let h = d;
+    for (let m = 1; m <= MAXIT; m++) {
+      const m2 = 2 * m; let aa = m * (b - m) * x / ((qam + m2) * (a + m2));
+      d = 1 + aa * d; if (Math.abs(d) < FPMIN) d = FPMIN; c = 1 + aa / c; if (Math.abs(c) < FPMIN) c = FPMIN; d = 1 / d; h *= d * c;
+      aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2));
+      d = 1 + aa * d; if (Math.abs(d) < FPMIN) d = FPMIN; c = 1 + aa / c; if (Math.abs(c) < FPMIN) c = FPMIN; d = 1 / d;
+      const del = d * c; h *= del; if (Math.abs(del - 1) < EPS) break;
+    }
+    return h;
+  }
+  function betainc(x, a, b) {
+    if (x <= 0) return 0; if (x >= 1) return 1;
+    const bt = Math.exp(lgamma(a + b) - lgamma(a) - lgamma(b) + a * Math.log(x) + b * Math.log(1 - x));
+    return x < (a + 1) / (a + b + 2) ? bt * betacf(a, b, x) / a : 1 - bt * betacf(b, a, 1 - x) / b;
+  }
+  const tpdf = (x, v) => Math.exp(lgamma((v + 1) / 2) - lgamma(v / 2)) / Math.sqrt(v * Math.PI) * Math.pow(1 + x * x / v, -(v + 1) / 2);
+  const tcdf = (x, v) => { const ib = betainc(v / (v + x * x), v / 2, 0.5); return x >= 0 ? 1 - 0.5 * ib : 0.5 * ib; };
+  const randN = () => { let u = 0, w = 0; while (!u) u = Math.random(); while (!w) w = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * w); };
+  const randGamma = (k) => { if (k < 1) return randGamma(k + 1) * Math.pow(Math.random(), 1 / k); const d = k - 1 / 3, c = 1 / Math.sqrt(9 * d); for (;;) { let x, v; do { x = randN(); v = 1 + c * x; } while (v <= 0); v = v * v * v; const u = Math.random(); if (u < 1 - 0.0331 * x ** 4 || Math.log(u) < 0.5 * x * x + d * (1 - v + Math.log(v))) return d * v; } };
+  const randDist = (D) => {
+    switch (D.__dist) {
+      case 'norm': return D.a + D.b * randN();
+      case 't': return randN() / Math.sqrt(2 * randGamma(D.a / 2) / D.a);
+      case 'binom': { let k = 0; for (let i = 0; i < D.a; i++) if (Math.random() < D.b) k++; return k; }
+      case 'pois': { if (D.a > 40) return Math.max(0, Math.round(D.a + Math.sqrt(D.a) * randN())); const L = Math.exp(-D.a); let k = 0, p = 1; do { k++; p *= Math.random(); } while (p > L); return k - 1; }
+      default: return D.a + (D.b - D.a) * Math.random();
+    }
+  };
+  function distMethod(D, name, args) {
+    const kind = D.__dist, a = D.a, b = D.b, x = args[0];
+    const moments = { norm: [a, b * b], t: [a > 1 ? 0 : NaN, a > 2 ? a / (a - 2) : NaN], binom: [a * b, a * b * (1 - b)], pois: [a, a], unif: [(a + b) / 2, (b - a) * (b - a) / 12] }[kind];
+    switch (name) {
+      case 'mean': return moments[0];
+      case 'variance': case 'var': return moments[1];
+      case 'stdev': return Math.sqrt(moments[1]);
+      case 'median': return kind === 'norm' ? a : kind === 't' ? 0 : kind === 'unif' ? (a + b) / 2 : distMethod(D, 'inversecdf', [0.5]);
+      case 'random': return args.length ? Array.from({ length: Math.max(0, Math.min(1e5, Math.floor(x))) }, () => randDist(D)) : randDist(D);
+      case 'pdf': return kind === 'norm' ? Math.exp(-0.5 * ((x - a) / b) ** 2) / (b * Math.sqrt(2 * Math.PI)) : kind === 't' ? tpdf(x, a) : kind === 'binom' ? binomP(a, b, x) : kind === 'pois' ? poisP(a, x) : (x >= a && x <= b ? 1 / (b - a) : 0);
+      case 'cdf': {
+        if (kind === 'norm') return ncdf((x - a) / b);
+        if (kind === 't') return tcdf(x, a);
+        if (kind === 'unif') return x <= a ? 0 : x >= b ? 1 : (x - a) / (b - a);
+        let s2 = 0; for (let i = 0; i <= Math.floor(x); i++) s2 += kind === 'binom' ? binomP(a, b, i) : poisP(a, i); return Math.min(1, s2);
+      }
+      case 'inversecdf': case 'quantile': {
+        if (kind === 'norm') return a + b * invStdNorm(x);
+        if (kind === 'unif') return a + (b - a) * x;
+        if (kind === 'binom' || kind === 'pois') { let s2 = 0; for (let i = 0; i < 1e5; i++) { s2 += kind === 'binom' ? binomP(a, b, i) : poisP(a, i); if (s2 >= x - 1e-12) return i; if (kind === 'binom' && i >= a) return a; } return NaN; }
+        let lo = -1e3, hi = 1e3; for (let i = 0; i < 200; i++) { const m = (lo + hi) / 2; if (tcdf(m, a) < x) lo = m; else hi = m; } return (lo + hi) / 2;
+      }
+      default: return NaN;
+    }
+  }
+  Object.assign(R, {
+    normaldist: (mu = 0, sd = 1) => ({ __dist: 'norm', a: mu, b: sd }),
+    tdist: (v) => ({ __dist: 't', a: v }),
+    binomialdist: (n, p) => ({ __dist: 'binom', a: n, b: p }),
+    poissondist: (l) => ({ __dist: 'pois', a: l }),
+    uniformdist: (lo = 0, hi = 1) => ({ __dist: 'unif', a: lo, b: hi }),
+    tpdf: (x, v) => tpdf(x, v), tcdf: (x, v) => tcdf(x, v),
+    csch: (a) => 1 / Math.sinh(a), sech: (a) => 1 / Math.cosh(a),
+    distance: (A, B) => (A instanceof Pt && B instanceof Pt ? Math.hypot(A.x - B.x, A.y - B.y) : NaN),
+    midpoint: (A, B) => (A instanceof Pt && B instanceof Pt ? new Pt((A.x + B.x) / 2, (A.y + B.y) / 2) : NaN),
+    polygon: (...a) => ({ __plot: 'polygon', pts: a.flatMap((q) => (isA(q) ? q : [q])).filter((q) => q instanceof Pt) }),
+    quantile: (L, p) => R.percentile(L, p),
+    var: (...a) => varOf(flatNums(a), 1),
+  });
+  H.mem = (o, name, args) => {
+    if (isA(o)) return o.map((e) => H.mem(e, name, args));
+    if (o instanceof Pt) return name === 'x' ? o.x : name === 'y' ? o.y : NaN;
+    if (o instanceof Cx) return name === 'x' ? o.re : name === 'y' ? o.im : NaN;
+    if (o && o.__dist) return args.length && args.some(isA) ? bcast((...v) => distMethod(o, name, v), args) : distMethod(o, name, args);
+    return NaN;
+  };
   function clampQ(q) { return Math.max(0, Math.min(4, Number.isFinite(q) ? q : 2)); }
-  const AGG = new Set(['barplot', 'mode', 'percentile', 'cumsum', 'diff', 'reverse', 'skewness', 'histogram', 'boxplot', 'dotplot', 'shuffle', 'total', 'mean', 'median', 'min', 'max', 'count', 'length', 'stdev', 'stdevp', 'variance', 'varp', 'mad', 'quartile', 'corr', 'cov', 'sort', 'unique', 'join']);
+  const AGG = new Set(['quantile', 'var', 'polygon', 'barplot', 'mode', 'percentile', 'cumsum', 'diff', 'reverse', 'skewness', 'histogram', 'boxplot', 'dotplot', 'shuffle', 'total', 'mean', 'median', 'min', 'max', 'count', 'length', 'stdev', 'stdevp', 'variance', 'varp', 'mad', 'quartile', 'corr', 'cov', 'sort', 'unique', 'join']);
   const AGG_ALWAYS = new Set([...AGG].filter((x) => x !== 'min' && x !== 'max'));
   const LISTVARS = new Set();
   const CXLOCAL = new Set();  // parameters of the function being compiled that hold complex values
@@ -300,7 +380,7 @@
   const BUILTINS = new Set(Object.keys(R).filter((k) => typeof R[k] === 'function' &&
     !['pow', 'deriv', 'logb'].includes(k)));
   Object.keys(ALIAS).forEach((k) => BUILTINS.add(k));
-  const SPECIAL = new Set(['sum', 'prod', 'int', 'nderiv']);
+  const SPECIAL = new Set(['sum', 'prod', 'int', 'nderiv', 'ddx']);
   const CONSTS = { pi: Math.PI, e: Math.E, tau: 2 * Math.PI, infinity: Infinity, i: 0 };
 
   /* ---------------- tokenizer ---------------- */
@@ -310,7 +390,7 @@
 
   function tokenize(src, userNames) {
     let s = src
-      .replace(/π/g, 'pi').replace(/θ/g, 'theta').replace(/τ/g, 'tau')
+      .replace(/π/g, 'pi').replace(/θ/g, 'theta').replace(/τ/g, 'tau').replace(/ρ/g, 'rho').replace(/φ|ϕ/g, 'phi')
       .replace(/−/g, '-').replace(/[×⋅·]/g, '*').replace(/÷/g, '/')
       .replace(/≤/g, '<=').replace(/≥/g, '>=').replace(/≠/g, '!=')
       .replace(/²/g, '^2').replace(/³/g, '^3')
@@ -318,7 +398,7 @@
       .replace(/\\ge(?![a-z])/g, '>=').replace(/\\pi/g, 'pi').replace(/\\theta/g, 'theta');
     const toks = [];
     let i = 0;
-    const known = new Set([...BUILTINS, ...SPECIAL, 'for', ...Object.keys(CONSTS), 'theta', ...(userNames || [])]);
+    const known = new Set([...BUILTINS, ...SPECIAL, 'for', 'rho', 'phi', ...Object.keys(CONSTS), 'theta', ...(userNames || [])]);
     while (i < s.length) {
       const ch = s[i];
       if (/\s/.test(ch)) { i++; continue; }
@@ -352,13 +432,14 @@
           }
           if (sub) j = k;
         }
+        if (toks.length && toks[toks.length - 1].t === 'dot') { toks.push({ t: 'id', v: run + (sub ? '_' + sub : '') }); i = j; continue; }
         const dm = /^[0-9]+/.exec(s.slice(j));
         if (!sub && dm && known.has(run + dm[0])) { toks.push({ t: 'id', v: run + dm[0] }); i = j + dm[0].length; continue; }
         // split the letter run into known names / single letters
         let p = 0;
         while (p < run.length) {
           let name = null, len = 1;
-          for (let L = Math.min(run.length - p, 10); L >= 1; L--) {
+          for (let L = Math.min(run.length - p, 20); L >= 1; L--) {
             const cand = run.slice(p, p + L);
             const isLast = p + L === run.length;
             const full = isLast && sub ? cand + '_' + sub : cand;
@@ -394,6 +475,7 @@
       if (ch === '[') { toks.push({ t: 'lbr' }); i++; continue; }
       if (ch === ']') { toks.push({ t: 'rbr' }); i++; continue; }
       if (s.startsWith('...', i)) { toks.push({ t: 'dots' }); i += 3; continue; }
+      if (ch === '.' && /[A-Za-z]/.test(s[i + 1] || '')) { toks.push({ t: 'dot' }); i++; continue; }
       if (ch === '\u2026') { toks.push({ t: 'dots' }); i++; continue; }
       if (ch === '~') { toks.push({ t: 'rel', v: '~' }); i++; continue; }
       if (ch === '{') { toks.push({ t: 'lb' }); i++; continue; }
@@ -483,6 +565,12 @@
       for (;;) {
         if (is('op', '!')) { next(); node = { t: 'fact', a: node }; }
         else if (is('deg')) { next(); node = { t: 'bin', op: '*', a: node, b: { t: 'num', v: Math.PI / 180 } }; }
+        else if (is('dot')) {
+          next();
+          const nm = expect('id', 'a property name').v;
+          const args = is('lp') ? parseArgs() : [];
+          node = { t: 'member', a: node, name: nm, args };
+        }
         else if (is('lbr') && ['var', 'call', 'list', 'range', 'index', 'listcomp'].includes(node.t)) {
           next();
           const savedAbs = absDepth; absDepth = 0;
@@ -641,7 +729,10 @@
     // statement: relation chain + optional restrictions
     const parts = [parseExpr()];
     const ops = [];
-    while (is('rel')) { ops.push(next().v); parts.push(parseExpr()); }
+    while (is('rel')) {
+      if (is('rel', '=') && pos + 1 >= toks.length) { next(); break; } // "2+2=" just evaluates
+      ops.push(next().v); parts.push(parseExpr());
+    }
     const restrict = [];
     while (is('lb')) {
       next();
@@ -669,6 +760,7 @@
       case 'range': return [n.a, n.next, n.b].filter(Boolean);
       case 'listcomp': return [n.e, n.src];
       case 'index': return [n.a, n.idx];
+      case 'member': return [n.a].concat(n.args);
       case 'rel': return n.parts;
       case 'pw': return n.cases.flatMap((c) => [c.cond, c.val]).concat(n.def ? [n.def] : []);
       default: return [];
@@ -696,6 +788,7 @@
             const A = n.args;
             if (n.n === 'sum' || n.n === 'prod') { rec(A[1], b); rec(A[2], b); rec(A[3], nb); }
             else if (n.n === 'int') { rec(A[0], b); rec(A[1], b); rec(A[2], nb); }
+            else if (n.n === 'ddx') { rec(A[0], b); }
             else { rec(A[0], nb); rec(A[1], b); }
           } else n.args.forEach((a) => rec(a, b));
           break;
@@ -713,6 +806,7 @@
     if (n.n === 'sum' || n.n === 'prod') return n.args[0].t === 'var' ? n.args[0].n : 'n';
     if (n.n === 'int') return n.args[3] && n.args[3].t === 'var' ? n.args[3].n : 'x';
     if (n.n === 'nderiv') return n.args[2] && n.args[2].t === 'var' ? n.args[2].n : 'x';
+    if (n.n === 'ddx') return n.args[1] && n.args[1].t === 'var' ? n.args[1].n : 'x';
     return 'x';
   }
   function calledFns(node) {
@@ -735,6 +829,7 @@
         case 'range': return { t: 'range', a: rec(n.a), next: n.next ? rec(n.next) : undefined, b: rec(n.b) };
         case 'index': return { t: 'index', a: rec(n.a), idx: rec(n.idx) };
         case 'listcomp': return { t: 'listcomp', e: rec(n.e), v: n.v, src: rec(n.src) };
+        case 'member': return { t: 'member', a: rec(n.a), name: n.name, args: n.args.map(rec) };
         case 'pw': return { t: 'pw', cases: n.cases.map((c) => ({ cond: rec(c.cond), val: rec(c.val) })), def: rec(n.def) };
         case 'call': {
           const args = n.args.map(rec);
@@ -760,6 +855,7 @@
     locals = locals || new Set();
     switch (n.t) {
       case 'list': case 'range': case 'listcomp': return true;
+      case 'member': return (n.name === 'random' && n.args.length > 0) || (['x', 'y'].includes(n.name) && listValued(n.a, locals));
       case 'var': return !locals.has(n.n) && LISTVARS.has(n.n);
       case 'index': return listValued(n.a, locals) && (n.idx.t === 'range' || n.idx.t === 'rel' || listValued(n.idx, locals));
       case 'neg': case 'fact': return listValued(n.a, locals);
@@ -787,7 +883,7 @@
   }
   function touches(n, locals) {
     switch (n.t) {
-      case 'list': case 'range': case 'index': case 'listcomp': return true;
+      case 'list': case 'range': case 'index': case 'listcomp': case 'member': return true;
       case 'var': return locals.has(n.n) ? CXLOCAL.has(n.n) : (n.n === 'i' || LISTVARS.has(n.n) || CXVARS.has(n.n));
       case 'call': if (AGG_ALWAYS.has(n.n) || (n.n === 'random' && n.args.length) || CXFUNCS.has(n.n)) return true; return n.args.some((a) => touches(a, locals));
       default: return kids(n).some((k) => touches(k, locals));
@@ -799,6 +895,7 @@
     switch (n.t) {
       case 'list': return '[' + n.items.map(g).join(',') + ']';
       case 'listcomp': { const inner = new Set(locals); inner.add(n.v); return `H.comp(${g(n.src)},(${jsId(n.v)})=>${gen(n.e, inner)})`; }
+      case 'member': return `H.mem(${g(n.a)},${JSON.stringify(n.name)},[${n.args.map(g).join(',')}])`;
       case 'range': return `H.range(${g(n.a)},${g(n.b)}${n.next ? ',' + g(n.next) : ''})`;
       case 'index': return `H.index(${g(n.a)},${g(n.idx)})`;
       case 'neg': return `H.neg(${g(n.a)})`;
@@ -870,6 +967,12 @@
           const v = specialVar(n);
           const inner = new Set(locals); inner.add(v);
           return `((a,b)=>{const N=400,h=(b-a)/N;const f=(${jsId(v)})=>${gen(args[2], inner)};let s=f(a)+f(b);for(let i=1;i<N;i++)s+=f(a+i*h)*(i%2?4:2);return s*h/3;})(${gen(args[0], locals)},${gen(args[1], locals)})`;
+        }
+        if (n.n === 'ddx') {
+          const v = specialVar(n);
+          const inner = new Set(locals); inner.add(v);
+          const at = locals.has(v) ? jsId(v) : `V[${JSON.stringify(v)}]`;
+          return `((p)=>{const f=(${jsId(v)})=>${gen(args[0], inner)};const h=1e-5*Math.max(1,Math.abs(p));return (f(p+h)-f(p-h))/(2*h);})(${at})`;
         }
         if (n.n === 'nderiv') {
           if (args.length < 2) throw new MathError('nderiv(expr, at)');

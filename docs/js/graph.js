@@ -108,7 +108,9 @@
       this._viewChanged(false);
       this.autoFit = true;
     }
+    squareView() { const v = this.view; const s = Math.sqrt(v.sx * v.sy); v.sx = s; v.sy = s; this._viewChanged(false); }
     zoomAt(px, py, fx, fy) {
+      if (this.locked) return;
       const v = this.view;
       const wx = this.invX(px), wy = this.invY(py);
       v.sx = clamp(v.sx * fx, 1e-9, 1e9);
@@ -160,14 +162,16 @@
       ctx.fillRect(0, 0, w, h);
       this.drawGrid(ctx);
       const vis = this.plots.filter((p) => !p.hidden);
-      for (const p of this.plots) p._sel = p.id === this.selectedId;
+      for (const p of this.plots) { p._sel = p.id === this.selectedId; p._hl = p.id === this.highlightId; }
       ctx.save();
       ctx.lineJoin = 'round'; ctx.lineCap = 'round';
       for (const p of vis) if (p.kind === 'domain') { try { this.drawDomain(ctx, p); } catch (e) { /* ignore */ } }
       for (const p of vis) if (p.kind === 'ineq') this.drawIneq(ctx, p);
+      for (const p of vis) if (p.kind === 'image') { try { this.drawImage(ctx, p); } catch (e) { /* ignore */ } }
       for (const p of vis) {
-        if (p.kind === 'ineq' || p.kind === 'domain') continue;
+        if (p.kind === 'ineq' || p.kind === 'domain' || p.kind === 'image') continue;
         p._seg = null;
+        ctx.globalAlpha = p.opacity === undefined ? 1 : p.opacity;
         try {
           switch (p.kind) {
             case 'fx': this.drawExplicit(ctx, p, true); break;
@@ -183,7 +187,8 @@
           }
         } catch (e) { /* ignore per-plot failures */ }
       }
-      for (const p of vis) if (p.kind === 'point') this.drawPoint(ctx, p);
+      for (const p of vis) if (p.kind === 'point') { ctx.globalAlpha = p.opacity === undefined ? 1 : p.opacity; this.drawPoint(ctx, p); }
+      ctx.globalAlpha = 1;
       ctx.restore();
       this.computePOIs();
       this.drawOverlay();
@@ -223,7 +228,20 @@
       };
       const xl = lines(r.xmin, r.xmax, stepX, minorX, true);
       const yl = lines(r.ymin, r.ymax, stepY, minorY, false);
-      if (S.grid) {
+      if (S.grid && S.gridType === 'polar') {
+        const ox = this.X(0), oy = this.Y(0);
+        const far = Math.max(Math.hypot(ox, oy), Math.hypot(w - ox, oy), Math.hypot(ox, h - oy), Math.hypot(w - ox, h - oy));
+        const ns = niceStep(70 / Math.min(this.view.sx, this.view.sy)).step;
+        ctx.lineWidth = 1;
+        for (let k = 1; k < 400 && k * ns * Math.min(this.view.sx, this.view.sy) < far; k++) {
+          ctx.strokeStyle = k % 5 === 0 ? T.major : T.minor;
+          ctx.beginPath(); ctx.ellipse(ox, oy, k * ns * this.view.sx, k * ns * this.view.sy, 0, 0, TAU); ctx.stroke();
+        }
+        for (let a = 0; a < 24; a++) {
+          const ang = a * Math.PI / 12; ctx.strokeStyle = a % 2 === 0 ? T.major : T.minor;
+          ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(ox + Math.cos(ang) * far * 1.5, oy - Math.sin(ang) * far * 1.5); ctx.stroke();
+        }
+      } else if (S.grid && S.gridType !== 'none') {
         ctx.lineWidth = 1;
         for (const pass of [false, true]) {
           ctx.strokeStyle = pass ? T.major : T.minor;
@@ -237,10 +255,22 @@
       const ax = this.X(0), ay = this.Y(0);
       if (S.axes === false) { ctx.restore(); return; }
       ctx.strokeStyle = T.axis; ctx.lineWidth = 1.4;
+      const showX = S.showAxisX !== false, showY = S.showAxisY !== false;
       ctx.beginPath();
-      if (ay >= -1 && ay <= h + 1) { ctx.moveTo(0, Math.round(ay) + 0.5); ctx.lineTo(w, Math.round(ay) + 0.5); }
-      if (ax >= -1 && ax <= w + 1) { ctx.moveTo(Math.round(ax) + 0.5, 0); ctx.lineTo(Math.round(ax) + 0.5, h); }
+      if (showX && ay >= -1 && ay <= h + 1) { ctx.moveTo(0, Math.round(ay) + 0.5); ctx.lineTo(w, Math.round(ay) + 0.5); }
+      if (showY && ax >= -1 && ax <= w + 1) { ctx.moveTo(Math.round(ax) + 0.5, 0); ctx.lineTo(Math.round(ax) + 0.5, h); }
       ctx.stroke();
+      if (S.arrows) {
+        ctx.fillStyle = T.axis;
+        const tri = (x, y, dx, dy) => { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - dx * 10 + dy * 5, y - dy * 10 - dx * 5); ctx.lineTo(x - dx * 10 - dy * 5, y - dy * 10 + dx * 5); ctx.closePath(); ctx.fill(); };
+        if (showX && ay >= 0 && ay <= h) { tri(w - 1, Math.round(ay) + 0.5, 1, 0); tri(1, Math.round(ay) + 0.5, -1, 0); }
+        if (showY && ax >= 0 && ax <= w) { tri(Math.round(ax) + 0.5, 1, 0, -1); tri(Math.round(ax) + 0.5, h - 1, 0, 1); }
+      }
+      if ((S.axisLabelX || S.axisLabelY)) {
+        ctx.fillStyle = T.text; ctx.strokeStyle = T.halo; ctx.lineWidth = 4; ctx.lineJoin = 'round'; ctx.font = 'italic 14px -apple-system, "Segoe UI", Roboto, sans-serif';
+        if (S.axisLabelX && showX) { ctx.textAlign = 'right'; ctx.textBaseline = 'bottom'; const yy = clamp(ay, 16, h - 6) - 8; ctx.strokeText(S.axisLabelX, w - 14, yy); ctx.fillText(S.axisLabelX, w - 14, yy); }
+        if (S.axisLabelY && showY) { ctx.textAlign = 'left'; ctx.textBaseline = 'top'; const xx = clamp(ax, 6, w - 60) + 10; ctx.strokeText(S.axisLabelY, xx, 8); ctx.fillText(S.axisLabelY, xx, 8); }
+      }
       // labels
       if (S.numbers) {
         ctx.fillStyle = T.text; ctx.strokeStyle = T.halo; ctx.lineWidth = 4; ctx.lineJoin = 'round';
@@ -249,7 +279,7 @@
         ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
         let ly = ayc + 16; if (ly > h - 4) ly = ayc - 7;
         for (const l of xl) {
-          if (!l.major || Math.abs(l.v) < 1e-12) continue;
+          if (S.showAxisX === false || !l.major || Math.abs(l.v) < 1e-12) continue;
           const px = this.X(l.v);
           if (px < 12 || px > w - 12) continue;
           label(labelX(l.k), px, ly);
@@ -259,7 +289,7 @@
         const lx = leftSide ? axc + 7 : axc - 7;
         ctx.textBaseline = 'middle';
         for (const l of yl) {
-          if (!l.major || Math.abs(l.v) < 1e-12) continue;
+          if (S.showAxisY === false || !l.major || Math.abs(l.v) < 1e-12) continue;
           const py = this.Y(l.v);
           if (py < 10 || py > h - 10) continue;
           label(fmtTick(l.v, stepY), lx, py);
@@ -274,7 +304,7 @@
 
     lineStyle(ctx, p, extra) {
       ctx.strokeStyle = p.color; ctx.fillStyle = p.color;
-      ctx.lineWidth = (p.width || 2.5) * (extra || 1);
+      ctx.lineWidth = (p.width || 2.5) * (extra || 1) * (p._hl ? 1.5 : 1);
       const lw = ctx.lineWidth;
       if (p.lineStyle === 'dashed') ctx.setLineDash([lw * 3.2, lw * 2.4]);
       else if (p.lineStyle === 'dotted') ctx.setLineDash([0.1, lw * 2.2]);
@@ -412,7 +442,7 @@
         p._seg = new Float32Array(seg);
       }
       ctx.setLineDash([]);
-      for (const q of pts) this.dot(ctx, this.X(q[0]), this.Y(q[1]), p.color, p.size || 5);
+      for (const q of pts) this.dot(ctx, this.X(q[0]), this.Y(q[1]), p.color, p.size || 5, p.pstyle);
     }
 
     drawPoints(ctx, p) {
@@ -428,7 +458,7 @@
         p._seg = new Float32Array(seg);
       }
       ctx.setLineDash([]);
-      for (const q of list) this.dot(ctx, this.X(q.x), this.Y(q.y), p.color, p.size || 4.5);
+      for (const q of list) this.dot(ctx, this.X(q.x), this.Y(q.y), p.color, p.size || 4.5, p.pstyle);
     }
 
     /* complex domain colouring: hue = arg f(z), brightness bands = log2 |f(z)| */
@@ -510,10 +540,32 @@
       ctx.restore();
     }
 
-    dot(ctx, x, y, color, rad) {
+    dot(ctx, x, y, color, rad, style) {
       if (!Number.isFinite(x) || !Number.isFinite(y) || x < -50 || y < -50 || x > this.w + 50 || y > this.h + 50) return;
-      ctx.beginPath(); ctx.arc(x, y, rad + 1.5, 0, TAU); ctx.fillStyle = this.theme.bg; ctx.globalAlpha = 0.9; ctx.fill(); ctx.globalAlpha = 1;
+      const ga = ctx.globalAlpha;
+      if (style === 'cross') {
+        ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = Math.max(2, rad * 0.45); ctx.lineCap = 'round'; ctx.beginPath();
+        ctx.moveTo(x - rad, y - rad); ctx.lineTo(x + rad, y + rad); ctx.moveTo(x + rad, y - rad); ctx.lineTo(x - rad, y + rad); ctx.stroke(); ctx.restore(); return;
+      }
+      if (style === 'open') {
+        ctx.beginPath(); ctx.arc(x, y, rad, 0, TAU); ctx.fillStyle = this.theme.bg; ctx.fill();
+        ctx.lineWidth = Math.max(2, rad * 0.4); ctx.strokeStyle = color; ctx.stroke(); return;
+      }
+      ctx.beginPath(); ctx.arc(x, y, rad + 1.5, 0, TAU); ctx.fillStyle = this.theme.bg; ctx.globalAlpha = ga * 0.9; ctx.fill(); ctx.globalAlpha = ga;
       ctx.beginPath(); ctx.arc(x, y, rad, 0, TAU); ctx.fillStyle = color; ctx.fill();
+    }
+
+    drawImage(ctx, p) {
+      const v = p.get(), img = p.img;
+      if (!v || !img || !img.complete || !img.naturalWidth) return;
+      const wU = v.w, hU = Number.isFinite(v.h) && v.h > 0 ? v.h : wU * img.naturalHeight / img.naturalWidth;
+      if (!Number.isFinite(wU) || !Number.isFinite(hU) || !Number.isFinite(v.x) || !Number.isFinite(v.y)) return;
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, Math.min(1, Number.isFinite(v.opacity) ? v.opacity : 1));
+      ctx.translate(this.X(v.x), this.Y(v.y));
+      if (Number.isFinite(v.angle) && v.angle) ctx.rotate(-(v.deg ? v.angle * Math.PI / 180 : v.angle));
+      ctx.drawImage(img, -wU * this.view.sx / 2, -hU * this.view.sy / 2, wU * this.view.sx, hU * this.view.sy);
+      ctx.restore();
     }
 
     drawPoint(ctx, p) {
@@ -521,12 +573,17 @@
       if (!pt || !Number.isFinite(pt[0]) || !Number.isFinite(pt[1])) { p._pt = null; return; }
       if (p.cond && !p.cond()) { p._pt = null; return; }
       p._pt = pt;
-      this.dot(ctx, this.X(pt[0]), this.Y(pt[1]), p.color, p.size || 5.5);
+      this.dot(ctx, this.X(pt[0]), this.Y(pt[1]), p.color, p.size || 5.5, p.pstyle);
       if (p.label) {
         const txt = p.label === 'coords' ? `(${fmtCoord(pt[0])}, ${fmtCoord(pt[1])})` : p.label;
-        ctx.save(); ctx.font = '13px -apple-system, "Segoe UI", Roboto, sans-serif'; ctx.textBaseline = 'bottom';
+        ctx.save(); ctx.font = `${p.labelSize || 13}px -apple-system, "Segoe UI", Roboto, sans-serif`;
+        const pos = p.labelPos || 'above-right', X0 = this.X(pt[0]), Y0 = this.Y(pt[1]), off = 10;
+        let lx = X0 + off, ly = Y0 - off, al = 'left', bl = 'bottom';
+        if (pos === 'above') { lx = X0; al = 'center'; } else if (pos === 'below') { lx = X0; ly = Y0 + off; al = 'center'; bl = 'top'; }
+        else if (pos === 'left') { lx = X0 - off; ly = Y0; al = 'right'; bl = 'middle'; } else if (pos === 'right') { lx = X0 + off; ly = Y0; bl = 'middle'; }
+        ctx.textAlign = al; ctx.textBaseline = bl;
         ctx.lineWidth = 4; ctx.strokeStyle = this.theme.bg; ctx.fillStyle = p.color; ctx.lineJoin = 'round';
-        ctx.strokeText(txt, this.X(pt[0]) + 9, this.Y(pt[1]) - 7); ctx.fillText(txt, this.X(pt[0]) + 9, this.Y(pt[1]) - 7); ctx.restore();
+        ctx.strokeText(txt, lx, ly); ctx.fillText(txt, lx, ly); ctx.restore();
       }
     }
 
@@ -860,6 +917,7 @@
       c.addEventListener('contextmenu', (e) => e.preventDefault());
       c.addEventListener('wheel', (e) => {
         e.preventDefault();
+        if (this.locked) return;
         const [mx, my] = pos(e);
         let dy = e.deltaY; if (e.deltaMode === 1) dy *= 16;
         const f = Math.exp(-clamp(dy, -200, 200) * (e.ctrlKey ? 0.01 : 0.0016));
@@ -884,7 +942,7 @@
         if (sel && this.trace && Math.hypot(this.X(this.trace.x) - mx, this.Y(this.trace.y) - my) < 12) { mode = 'trace'; return; }
         // axis scaling zones
         const ay = clamp(this.Y(0), 0, this.h), ax = clamp(this.X(0), 0, this.w);
-        if (this.settings.numbers) {
+        if (this.settings.numbers && !this.locked) {
           if (Math.abs(my - ay) < 20 && !this.hitCurve(mx, my)) { mode = 'axisx'; this._anchor = this.invX(mx); c.style.cursor = 'ew-resize'; return; }
           if (Math.abs(mx - ax) < 28 && !this.hitCurve(mx, my)) { mode = 'axisy'; this._anchor = this.invY(my); c.style.cursor = 'ns-resize'; return; }
         }
@@ -909,7 +967,7 @@
         moved = Math.max(moved, Math.hypot(mx - start[0], my - start[1]));
         if (mode === 'ext') { this.cb.onPointer('move', this.invX(mx), this.invY(my), e); last = [mx, my]; return; }
         if (mode === 'pan') {
-          if (moved < 2) return;
+          if (moved < 2 || this.locked) return;
           this.view.x0 -= (mx - last[0]) / this.view.sx;
           this.view.y0 += (my - last[1]) / this.view.sy;
           this._viewChanged(true);

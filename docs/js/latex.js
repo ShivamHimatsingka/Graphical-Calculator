@@ -84,7 +84,12 @@
     function command(name) {
       switch (name) {
         case 'left': case 'right': { const n = ts[st.i]; if (n && n.c === 'ch' && n.v === '.') st.i++; return ''; }
-        case 'frac': case 'dfrac': case 'tfrac': { const a = parseArg(), b = parseArg(); return `(${wrap(a)}/${wrap(b)})`; }
+        case 'frac': case 'dfrac': case 'tfrac': {
+          const a = parseArg(), b = parseArg();
+          const dm = /^d([A-Za-z])$/.exec(b);
+          if (a === 'd' && dm) { const body = parseSeq(true, true); return `ddx(${body}${dm[1] !== 'x' ? ',' + dm[1] : ''})`; }
+          return `(${wrap(a)}/${wrap(b)})`;
+        }
         case 'sqrt': {
           let n = null;
           if (ts[st.i] && ts[st.i].c === 'ch' && ts[st.i].v === '[') {
@@ -155,7 +160,7 @@
   const KNOWN_FN = new Set(['asin', 'acos', 'atan', 'acot', 'asec', 'acsc', 'asinh', 'acosh', 'atanh', 'abs', 'floor', 'ceil', 'round', 'sign', 'mod', 'nCr', 'nPr',
     'cbrt', 'total', 'mean', 'median', 'count', 'length', 'stdev', 'stdevp', 'variance', 'varp', 'mad', 'quartile', 'corr', 'cov', 'sort', 'unique', 'join',
     'shuffle', 'random', 'normpdf', 'normcdf', 'invnorm', 'binompdf', 'binomcdf', 'poissonpdf', 'poissoncdf', 'exppdf', 'expcdf', 'unifpdf', 'unifcdf', 'erf',
-    'sum', 'prod', 'int', 'nderiv', 'real', 'imag', 'conj', 'arg', 'lcm', 'hypot', 'fract', 'trunc', 'sinh', 'exp2', 'log2', 'atan2', 'factorial', 'gamma', 'rad', 'degrees']);
+    'sum', 'prod', 'int', 'nderiv', 'ddx', 'normaldist', 'tdist', 'binomialdist', 'poissondist', 'uniformdist', 'tpdf', 'tcdf', 'csch', 'sech', 'distance', 'midpoint', 'polygon', 'quantile', 'var', 'histogram', 'boxplot', 'dotplot', 'barplot', 'mode', 'percentile', 'cumsum', 'diff', 'reverse', 'skewness', 'real', 'imag', 'conj', 'arg', 'lcm', 'hypot', 'fract', 'trunc', 'sinh', 'exp2', 'log2', 'atan2', 'factorial', 'gamma', 'rad', 'degrees']);
   const ARC = { asin: 'arcsin', acos: 'arccos', atan: 'arctan', acot: 'arccot', asec: 'arcsec', acsc: 'arccsc' };
 
   function matching(s, open) {
@@ -192,6 +197,8 @@
             const cand = run.slice(p, p + L);
             if (cand === 'pi') { out += '\\pi '; p += L; matched = true; break; }
             if (cand === 'theta') { out += '\\theta '; p += L; matched = true; break; }
+            if (cand === 'rho') { out += '\\rho '; p += L; matched = true; break; }
+            if (cand === 'phi') { out += '\\phi '; p += L; matched = true; break; }
             if (cand === 'tau') { out += '\\tau '; p += L; matched = true; break; }
             if (cand === 'infinity') { out += '\\infty '; p += L; matched = true; break; }
             if (cand === 'sqrt' && s[j] === '(' && p + L === run.length) {
