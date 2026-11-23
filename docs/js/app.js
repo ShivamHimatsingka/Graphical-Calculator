@@ -40,7 +40,7 @@
     if (type === 'expr' || type === 'table') {
       if (!it.color) { it.color = PALETTE[state.colorIdx % PALETTE.length]; state.colorIdx++; }
     }
-    if (type === 'table' && !it.rows) { it.rows = [['', ''], ['', ''], ['', '']]; it.showLine = false; it.tno = (state.tableCount = (state.tableCount || 0) + 1); }
+    if (type === 'table') { if (!it.rows) it.rows = [['', ''], ['', ''], ['', '']]; it.showLine = !!it.showLine; it.tno = (state.tableCount = (state.tableCount || 0) + 1); }
     return it;
   }
   function defaultState() {
@@ -88,6 +88,64 @@
   }
 
   /* ================= evaluation ================= */
+  function fmtValue(v) {
+    if (Array.isArray(v)) return '[' + v.slice(0, 12).map(fmtValue).join(', ') + (v.length > 12 ? `, … (${v.length} items)` : '') + ']';
+    if (v instanceof ME.Pt) return `(${fmt(v.x)}, ${fmt(v.y)})`;
+    if (typeof v === 'boolean') return String(v);
+    return typeof v === 'number' ? fmt(v) : 'undefined';
+  }
+  const isPtVal = (v) => v instanceof ME.Pt || (Array.isArray(v) && v.length > 0 && v.every((q) => q instanceof ME.Pt));
+
+  function solveLinear(M, b) {
+    const n = b.length, A = M.map((r, i) => r.concat([b[i]]));
+    for (let c = 0; c < n; c++) {
+      let piv = c;
+      for (let r = c + 1; r < n; r++) if (Math.abs(A[r][c]) > Math.abs(A[piv][c])) piv = r;
+      if (Math.abs(A[piv][c]) < 1e-300) return null;
+      [A[c], A[piv]] = [A[piv], A[c]];
+      for (let r = c + 1; r < n; r++) { const f = A[r][c] / A[c][c]; for (let k = c; k <= n; k++) A[r][k] -= f * A[c][k]; }
+    }
+    const x = new Array(n);
+    for (let i = n - 1; i >= 0; i--) { let s2 = A[i][n]; for (let k = i + 1; k < n; k++) s2 -= A[i][k] * x[k]; x[i] = s2 / A[i][i]; }
+    return x;
+  }
+  // Levenberg–Marquardt least squares: res(p) -> residual array
+  function levMar(res, p0) {
+    const dot = (a) => a.reduce((s2, v) => s2 + v * v, 0);
+    let p = p0.slice(); const k = p.length;
+    if (!k) return p;
+    let r = res(p), sse = dot(r), lam = 1e-3;
+    if (!Number.isFinite(sse)) return p;
+    for (let it = 0; it < 300; it++) {
+      const n = r.length, J = [];
+      for (let j = 0; j < k; j++) {
+        const h = 1e-6 * Math.max(1, Math.abs(p[j])); const q = p.slice(); q[j] += h;
+        const r2 = res(q); J.push(r.map((v, i) => (v - r2[i]) / h));
+      }
+      const A = [], g = [];
+      for (let a = 0; a < k; a++) {
+        A.push([]); let ga = 0; for (let i = 0; i < n; i++) ga += J[a][i] * r[i]; g.push(ga);
+        for (let b = 0; b < k; b++) { let sum = 0; for (let i = 0; i < n; i++) sum += J[a][i] * J[b][i]; A[a].push(sum); }
+      }
+      let improved = false;
+      for (let tries = 0; tries < 14; tries++) {
+        const M = A.map((row, a) => row.map((v, b) => v + (a === b ? lam * (A[a][a] || 1) : 0)));
+        const d = solveLinear(M, g);
+        if (!d) { lam *= 10; continue; }
+        const q = p.map((v, i) => v + d[i]); const rq = res(q); const s2 = dot(rq);
+        if (Number.isFinite(s2) && s2 < sse) {
+          const done = Math.abs(sse - s2) <= 1e-15 * (1 + sse);
+          p = q; r = rq; sse = s2; lam = Math.max(lam / 5, 1e-12); improved = true;
+          if (done) return p;
+          break;
+        }
+        lam *= 5;
+      }
+      if (!improved) break;
+    }
+    return p;
+  }
+
   function evalNumberText(text) {
     try {
       const st = ME.parseStatement(String(text), []);
@@ -186,12 +244,6 @@
         else varDefs[rec.def.name] = rec;
       }
     }
-    // functions
-    for (const name of Object.keys(fnDefs)) {
-      const rec = fnDefs[name];
-      if (!rec.parts) continue;
-      try { F[name] = ME.compile(rec.parts[1], rec.def.params); } catch (e) { rec.err = e.message; }
-    }
     // variables
     const mark = new Map();
     curOrder = [];
@@ -215,6 +267,28 @@
         if (lit < sl.min) sl.min = Math.floor(lit); if (lit > sl.max) sl.max = Math.ceil(lit);
       }
     }
+    // lists: table columns, then list-valued variable definitions (fixpoint)
+    ME.LISTVARS.clear();
+    const tableRecs = list.filter((r) => r.item.type === 'table');
+    for (const tr of tableRecs) { const n = tr.item.tno; ['x', 'y'].forEach((c) => { ME.LISTVARS.add(`${c}_${n}`); V[`${c}_${n}`] = []; }); }
+    for (let guard = 0, changed = true; changed && guard < 12; guard++) {
+      changed = false;
+      for (const name of Object.keys(varDefs)) {
+        const rec = varDefs[name];
+        if (!rec.isSlider && !ME.LISTVARS.has(name) && ME.listValued(rec.parts[1])) { ME.LISTVARS.add(name); changed = true; }
+      }
+    }
+    // functions
+    for (const name of Object.keys(fnDefs)) {
+      const rec = fnDefs[name];
+      if (!rec.parts) continue;
+      try { F[name] = ME.compile(rec.parts[1], rec.def.params); } catch (e) { rec.err = e.message; }
+    }
+    for (const tr of tableRecs) {
+      const xs = [], ys = [];
+      for (const r of tr.item.rows) { const x = evalNumberText(r[0]), y = evalNumberText(r[1]); if (Number.isFinite(x) && Number.isFinite(y)) { xs.push(x); ys.push(y); } }
+      V[`x_${tr.item.tno}`] = xs; V[`y_${tr.item.tno}`] = ys;
+    }
     for (const name of Object.keys(varDefs)) {
       const rec = varDefs[name];
       if (rec.isSlider) continue;
@@ -222,7 +296,7 @@
       visit(name);
     }
     recomputeVars();
-    const defined = new Set(Object.keys(varDefs));
+    const defined = new Set([...Object.keys(varDefs), ...ME.LISTVARS]);
     // pass 3: classify & build plots
     const plots = [];
     for (const rec of list) {
@@ -294,7 +368,11 @@
     if (rec.def && rec.def.type === 'var') {
       rec.kind = 'var';
       needMissing([P[1]], []);
-      if (!rec.isSlider) rec.readout = () => V[rec.def.name];
+      if (!rec.isSlider) {
+        const nm = rec.def.name;
+        rec.readout = () => V[nm];
+        if (isPtVal(V[nm])) { rec.hasPoints = true; plots.push(Object.assign(base(), { kind: 'points', get: () => V[nm], showLine: !!item.showLine, size: 3.5 + item.width * 0.8 })); }
+      }
       return;
     }
 
@@ -303,7 +381,12 @@
       if (e.t === 'tuple') {
         if (e.items.length !== 2) throw new ME.MathError('Only 2D points (x, y) are supported');
         const fvs = new Set(); e.items.forEach((n) => fvOf(n).forEach((v) => fvs.add(v)));
-        if (fvs.has('t') && !defined.has('t')) {
+        if (e.items.some((n) => ME.listValued(n))) {
+          rec.kind = 'points'; rec.hasPoints = true;
+          needMissing(allNodes(), []);
+          const pf = ME.compile(e, []);
+          plots.push(Object.assign(base(), { kind: 'points', get: pf, showLine: !!item.showLine, size: 3.5 + item.width * 0.8 }));
+        } else if (fvs.has('t') && !defined.has('t')) {
           rec.kind = 'param';
           needMissing(allNodes(), ['t']);
           const fx = ME.compile(e.items[0], ['t']), fy = ME.compile(e.items[1], ['t']);
@@ -331,6 +414,30 @@
       needMissing([e], []);
       const fn = ME.compile(e, []);
       rec.readout = () => fn();
+      if (isPtVal(fn())) { rec.hasPoints = true; plots.push(Object.assign(base(), { kind: 'points', get: fn, showLine: !!item.showLine, size: 3.5 + item.width * 0.8 })); }
+      return;
+    }
+    if (ops.length === 1 && ops[0] === '~') {
+      const Lh = P[0], Rh = P[1];
+      if (!ME.listValued(Lh)) throw new ME.MathError('Left side of ~ must be a list, e.g. y_1');
+      const rfv = ME.freeVars(Rh);
+      const listNames = [...rfv].filter((n) => ME.LISTVARS.has(n));
+      if (!listNames.length) throw new ME.MathError('Right side needs a list, e.g. y_1 ~ m x_1 + b');
+      const params = [...rfv].filter((n) => !ME.LISTVARS.has(n) && !defined.has(n) && n !== 'x' && n !== 'y');
+      const yf = ME.compile(Lh, []), mf = ME.compile(Rh, []);
+      const Y = yf();
+      if (!Array.isArray(Y) || !Y.length) throw new ME.MathError('No data in the left-hand list');
+      const res = (p) => { params.forEach((n, i) => { V[n] = p[i]; }); const M = mf(); return Y.map((y, i) => y - (Array.isArray(M) ? M[i] : M)); };
+      const sol = levMar(res, params.map(() => 1));
+      const r = res(sol);
+      params.forEach((n, i) => { V[n] = sol[i]; defined.add(n); });
+      const sse = r.reduce((a, v) => a + v * v, 0), yb = Y.reduce((a, v) => a + v, 0) / Y.length, sst = Y.reduce((a, v) => a + (v - yb) * (v - yb), 0);
+      const r2 = sst > 0 ? 1 - sse / sst : NaN;
+      rec.kind = 'regression';
+      rec.extraHtml = `<div class="val">${params.map((n) => `${esc(n)} = ${fmt(V[n], 6)}`).join(',  ')}</div><div>r² = ${fmt(r2, 5)}${Number.isFinite(sse) ? ` &nbsp; n = ${Y.length}` : ''}</div>`;
+      const cl = JSON.parse(JSON.stringify(Rh));
+      ME.walk(cl, (nd) => { if (nd.t === 'var' && listNames.includes(nd.n)) nd.n = 'x'; });
+      plots.push(Object.assign(base(), { kind: 'fx', f: ME.compile(cl, ['x']), cond: null, range: null }));
       return;
     }
     if (ops.includes('!=')) throw new ME.MathError('≠ is not supported');
@@ -428,8 +535,9 @@
     if (!rec.err && rec.readout) {
       let v; try { v = rec.readout(); } catch (e) { v = NaN; }
       const label = rec.kind === 'var' ? `${esc(rec.def.name)} ` : '';
-      html += `<div class="val">${label}= ${typeof v === 'number' ? fmt(v) : 'undefined'}</div>`;
+      html += `<div class="val">${label}= ${esc(fmtValue(v))}</div>`;
     }
+    if (!rec.err && rec.extraHtml) html += rec.extraHtml;
     row.msg.innerHTML = html;
   }
 
@@ -440,7 +548,7 @@
       const vEl = row.msg.querySelector('.val'); if (!vEl) continue;
       let v; try { v = rec.readout(); } catch (e) { v = NaN; }
       const label = rec.kind === 'var' ? `${esc(rec.def.name)} ` : '';
-      vEl.innerHTML = `${label}= ${typeof v === 'number' ? fmt(v) : 'undefined'}`;
+      vEl.innerHTML = `${label}= ${esc(fmtValue(v))}`;
     }
   }
 
@@ -737,6 +845,7 @@
       <label>Step <input type="text" data-s="step" value="${sl.step}"></label>
       <label>Speed <span class="seg" data-seg="speed">${[0.25, 0.5, 1, 2, 4].map((s) => `<button data-v="${s}" class="${(sl.speed || 1) === s ? 'on' : ''}">${s}×</button>`).join('')}</span></label></div>`;
     }
+    if (rec && rec.hasPoints) html += `<div class="sec"><label>Connect points with a line <input type="checkbox" data-line ${item.showLine ? 'checked' : ''}></label></div>`;
     html += '<div class="btns"><button data-act="dup">Duplicate</button><button data-act="del" class="danger">Delete</button></div>';
     pop.innerHTML = html;
     place(pop, anchor);
@@ -753,6 +862,7 @@
       const r = recs.get(item.id); if (r) syncSliderUI(r); saveSoon(); commitSoon();
     });
     pop.querySelectorAll('[data-seg="speed"] button').forEach((b) => b.onclick = () => { item.slider.speed = parseFloat(b.dataset.v); pop.querySelectorAll('[data-seg="speed"] button').forEach((x) => x.classList.toggle('on', x === b)); saveSoon(); });
+    const lc = pop.querySelector('[data-line]'); if (lc) lc.onchange = () => { item.showLine = lc.checked; redraw(); };
     pop.querySelector('[data-act="del"]').onclick = () => deleteItem(item.id);
     pop.querySelector('[data-act="dup"]').onclick = () => { closePopovers(); duplicateItem(item.id); };
   }
@@ -802,9 +912,13 @@
     ['Calculus: f, f\' and area', ['f(x)=x^3-3x', 'y=f\'(x)', 'y=f(x){-2<=x<=1}', 'int(0,2,f(x))']],
     ['Piecewise & restrictions', ['y={x<0:-x, x^2}', 'y=2{1<=x<=4}', 'x=-3{-2<=y<=2}']],
     ['Draggable points', ['(1,2)', '(3,-1)', 'y=m x+c', 'm=0.5', 'c=1']],
+    ['Lists & statistics', ['L=[1...10]', 'M=L^2', '(L,M)', 'mean(M)', 'median(M)', 'stdev(M)', 'sort([5,3,9,1])', 'L[L>6]', 'total(L)']],
+    ['Regression from a table', [{ type: 'table', rows: [['1', '2.1'], ['2', '3.9'], ['3', '6.2'], ['4', '7.8'], ['5', '10.1'], ['6', '12.2'], ['', '']] }, 'y_1 ~ m x_1 + b']],
+    ['Quadratic regression', [{ type: 'table', rows: [['-3', '10'], ['-2', '4.5'], ['-1', '1.2'], ['0', '-0.5'], ['1', '1.1'], ['2', '4.2'], ['3', '9.8'], ['', '']] }, 'y_1 ~ a x_1^2 + b x_1 + c']],
   ];
   function loadExample(texts) {
-    state.items = texts.map((t) => newItem('expr', { text: t }));
+    state.tableCount = 0;
+    state.items = texts.map((t) => (typeof t === 'string' ? newItem('expr', { text: t }) : newItem(t.type, JSON.parse(JSON.stringify(t)))));
     state.items.push(newItem('expr'));
     playing.clear(); graph.setSelected(null); renderList(); evaluate(); graph.resetView(); commitSoon(); saveSoon();
   }
@@ -840,7 +954,7 @@
   function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 1800); }
 
   function showHelp() {
-    const it = newItem('note', { text: 'Syntax cheat-sheet\n• y = x^2, x = y^2, r = 2 sin(3θ)\n• Implicit: x^2 + y^2 = 4   Inequality: y < sin(x), 1 < x < 3\n• Parametric: (cos(t), sin(t)){0<=t<=2π}\n• Points: (1, 2) — drag them!\n• Functions: f(x) = x^2, then f(3) or f\'(x)\n• Sliders: type a new letter (a x) and click “add slider”\n• Restrict a domain: y = x^2 {x > 0}   Piecewise: y = {x<0: -x, x}\n• sum(n,1,10,n^2)   int(0,1,x^2)   abs, sqrt, ln, log, nCr, floor …\n• Click a curve for zeros, extrema & intersections' });
+    const it = newItem('note', { text: 'Syntax cheat-sheet\n• y = x^2, x = y^2, r = 2 sin(3θ)\n• Implicit: x^2 + y^2 = 4   Inequality: y < sin(x), 1 < x < 3\n• Parametric: (cos(t), sin(t)){0<=t<=2π}\n• Points: (1, 2) — drag them!\n• Functions: f(x) = x^2, then f(3) or f\'(x)\n• Sliders: type a new letter (a x) and click “add slider”\n• Restrict a domain: y = x^2 {x > 0}   Piecewise: y = {x<0: -x, x}\n• Lists: L=[1...10], [2,4...20], L^2, L[3], L[L>5], (L, L^2)\n• Stats: mean, median, total, stdev, variance, quartile, corr, cov, sort, join, unique, count\n• Tables make lists x_1, y_1 — fit with  y_1 ~ m x_1 + b  (any model, e.g. a*e^(b x_1))\n• sum(n,1,10,n^2)   int(0,1,x^2)   abs, sqrt, ln, log, nCr, floor …\n• Click a curve for zeros, extrema & intersections' });
     state.items.unshift(it); $('#list').insertBefore(createRow(it), $('#list').firstChild); evaluate(); commitSoon(); saveSoon();
     $('#list').scrollTop = 0;
   }
@@ -851,7 +965,7 @@
     ['|a|', '||', 1], ['π', 'pi'], ['7', '7', 0, 'num'], ['8', '8', 0, 'num'], ['9', '9', 0, 'num'], ['÷', '/', 0, 'op'], ['≤', '<='], ['≥', '>='],
     ['√', 'sqrt()', 1], ['e', 'e'], ['4', '4', 0, 'num'], ['5', '5', 0, 'num'], ['6', '6', 0, 'num'], ['×', '*', 0, 'op'], ['=', '='], ['⌫', '\b', 0, 'op'],
     ['t', 't'], ['θ', 'theta'], ['1', '1', 0, 'num'], ['2', '2', 0, 'num'], ['3', '3', 0, 'num'], ['−', '-', 0, 'op'], ['+', '+', 0, 'op'], ['⏎', '\n', 0, 'op'],
-    [',', ','], ['a₁', '_1'], ['0', '0', 0, 'num'], ['.', '.', 0, 'num'], ['!', '!'], ['°', '°'], ['{ }', '{}', 1], ['f(x)', 'f()', 1],
+    [',', ','], ['a₁', '_1'], ['0', '0', 0, 'num'], ['.', '.', 0, 'num'], ['[ ]', '[]', 1], ['°', '°'], ['{ }', '{}', 1], ['f(x)', 'f()', 1],
   ];
   const KP_FN = ['sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'sinh', 'cosh', 'tanh', 'ln', 'log', 'exp', 'sqrt', 'cbrt', 'abs', 'floor', 'ceil', 'round', 'sign', 'min', 'max', 'mod', 'nCr', 'nPr', 'sum', 'int', 'gcd', 'lcm']
     .map((n) => [n, n === 'sum' ? 'sum(n,1,10,n)' : n === 'int' ? 'int(0,1,x)' : n + '()', n === 'sum' || n === 'int' ? 0 : 1]);

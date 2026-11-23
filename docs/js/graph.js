@@ -171,6 +171,7 @@
             case 'param': this.drawParam(ctx, p); break;
             case 'implicit': this.drawImplicit(ctx, p); break;
             case 'table': this.drawTable(ctx, p); break;
+            case 'points': this.drawPoints(ctx, p); break;
             default: break;
           }
         } catch (e) { /* ignore per-plot failures */ }
@@ -404,6 +405,22 @@
       }
       ctx.setLineDash([]);
       for (const q of pts) this.dot(ctx, this.X(q[0]), this.Y(q[1]), p.color, p.size || 5);
+    }
+
+    drawPoints(ctx, p) {
+      let v;
+      try { v = p.get(); } catch (e) { return; }
+      const list = (Array.isArray(v) ? v : [v]).filter((q) => q && Number.isFinite(q.x) && Number.isFinite(q.y)).slice(0, 50000);
+      if (p.showLine && list.length > 1) {
+        const seg = [];
+        this.lineStyle(ctx, p);
+        ctx.beginPath();
+        list.forEach((q, i) => { const x = this.X(q.x), y = this.Y(q.y); if (i) { ctx.lineTo(x, y); seg.push(this.X(list[i - 1].x), this.Y(list[i - 1].y), x, y); } else ctx.moveTo(x, y); });
+        ctx.stroke();
+        p._seg = new Float32Array(seg);
+      }
+      ctx.setLineDash([]);
+      for (const q of list) this.dot(ctx, this.X(q.x), this.Y(q.y), p.color, p.size || 4.5);
     }
 
     dot(ctx, x, y, color, rad) {

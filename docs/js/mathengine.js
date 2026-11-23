@@ -103,6 +103,81 @@
     },
   });
 
+  /* ---- lists & points ---- */
+  const isA = Array.isArray;
+  class Pt { constructor(x, y) { this.x = x; this.y = y; } }
+  function bcast(fn, args) {
+    let n = -1;
+    for (const a of args) if (isA(a)) n = n < 0 ? a.length : Math.min(n, a.length);
+    if (n < 0) return fn(...args);
+    const out = new Array(n);
+    for (let i = 0; i < n; i++) out[i] = bcast(fn, args.map((a) => (isA(a) ? a[i] : a)));
+    return out;
+  }
+  const OPF = { '+': (a, b) => a + b, '-': (a, b) => a - b, '*': (a, b) => a * b, '/': (a, b) => a / b, '^': (a, b) => R.pow(a, b) };
+  const CMP = { '<': (a, b) => a < b, '>': (a, b) => a > b, '<=': (a, b) => a <= b, '>=': (a, b) => a >= b, '=': (a, b) => Math.abs(a - b) < 1e-9, '!=': (a, b) => a !== b };
+  const ptwise = (f) => (a, b) => {
+    if (a instanceof Pt || b instanceof Pt) {
+      const A = a instanceof Pt ? a : new Pt(a, a), B = b instanceof Pt ? b : new Pt(b, b);
+      return new Pt(f(A.x, B.x), f(A.y, B.y));
+    }
+    return f(a, b);
+  };
+  const nums = (a) => (isA(a) ? a : [a]).filter((v) => typeof v === 'number' && !Number.isNaN(v));
+  const flatNums = (args) => nums(args.length === 1 ? args[0] : args.flatMap((a) => (isA(a) ? a : [a])));
+  const meanOf = (a) => (a.length ? a.reduce((s, v) => s + v, 0) / a.length : NaN);
+  const varOf = (a, ddof) => { if (a.length - ddof <= 0) return NaN; const m = meanOf(a); return a.reduce((s, v) => s + (v - m) * (v - m), 0) / (a.length - ddof); };
+  const H = {
+    Pt, bc: bcast,
+    pt: (x, y) => ((isA(x) || isA(y)) ? bcast((a, b) => new Pt(a, b), [x, y]) : new Pt(x, y)),
+    bop: (op, a, b) => bcast(ptwise(OPF[op]), [a, b]),
+    neg: (a) => bcast((x) => (x instanceof Pt ? new Pt(-x.x, -x.y) : -x), [a]),
+    cmp: (op, a, b) => bcast(CMP[op], [a, b]),
+    land: (...xs) => bcast((...v) => v.every(Boolean), xs),
+    range(a, b, next) {
+      const step = next === undefined ? 1 : next - a;
+      if (!Number.isFinite(a) || !Number.isFinite(b) || !step || !Number.isFinite(step)) return [];
+      const n = Math.floor((b - a) / step + 1e-9) + 1;
+      if (n <= 0) return [];
+      const out = []; for (let i = 0; i < Math.min(n, 100000); i++) out.push(a + i * step);
+      return out;
+    },
+    index(L, idx) {
+      if (!isA(L)) return NaN;
+      if (isA(idx)) {
+        if (idx.length && typeof idx[0] === 'boolean') return L.filter((_, i) => idx[i]);
+        return idx.map((i) => { const v = L[Math.round(i) - 1]; return v === undefined ? NaN : v; });
+      }
+      if (typeof idx === 'boolean') return idx ? L : [];
+      const v = L[Math.round(idx) - 1];
+      return v === undefined ? NaN : v;
+    },
+  };
+  Object.assign(R, {
+    total: (...a) => flatNums(a).reduce((s, v) => s + v, 0),
+    mean: (...a) => meanOf(flatNums(a)),
+    median: (...a) => { const v = flatNums(a).sort((x, y) => x - y), n = v.length; return n ? (n % 2 ? v[(n - 1) / 2] : (v[n / 2 - 1] + v[n / 2]) / 2) : NaN; },
+    min: (...a) => { const v = flatNums(a); return v.length ? Math.min(...v) : NaN; },
+    max: (...a) => { const v = flatNums(a); return v.length ? Math.max(...v) : NaN; },
+    count: (a) => (isA(a) ? a.length : 1),
+    length: (a) => (isA(a) ? a.length : 1),
+    stdev: (...a) => Math.sqrt(varOf(flatNums(a), 1)),
+    stdevp: (...a) => Math.sqrt(varOf(flatNums(a), 0)),
+    variance: (...a) => varOf(flatNums(a), 1),
+    varp: (...a) => varOf(flatNums(a), 0),
+    mad: (...a) => { const v = flatNums(a), m = meanOf(v); return meanOf(v.map((x) => Math.abs(x - m))); },
+    quartile: (L, q) => { const v = nums(L).sort((x, y) => x - y); if (!v.length) return NaN; const pos = clampQ(q) / 4 * (v.length - 1), lo = Math.floor(pos), hi = Math.ceil(pos); return v[lo] + (v[hi] - v[lo]) * (pos - lo); },
+    corr: (A, B) => { const n = Math.min(A.length, B.length), a = A.slice(0, n), b = B.slice(0, n), ma = meanOf(a), mb = meanOf(b); let sab = 0, saa = 0, sbb = 0; for (let i = 0; i < n; i++) { sab += (a[i] - ma) * (b[i] - mb); saa += (a[i] - ma) ** 2; sbb += (b[i] - mb) ** 2; } return sab / Math.sqrt(saa * sbb); },
+    cov: (A, B) => { const n = Math.min(A.length, B.length), a = A.slice(0, n), b = B.slice(0, n), ma = meanOf(a), mb = meanOf(b); let s = 0; for (let i = 0; i < n; i++) s += (a[i] - ma) * (b[i] - mb); return s / (n - 1); },
+    sort: (L, K) => { if (!isA(L)) return L; if (isA(K)) { return L.map((v, i) => [v, K[i]]).sort((x, y) => x[1] - y[1]).map((x) => x[0]); } return L.slice().sort((x, y) => x - y); },
+    unique: (L) => [...new Set(isA(L) ? L : [L])].sort((x, y) => x - y),
+    join: (...a) => a.flatMap((x) => (isA(x) ? x : [x])),
+  });
+  function clampQ(q) { return Math.max(0, Math.min(4, Number.isFinite(q) ? q : 2)); }
+  const AGG = new Set(['total', 'mean', 'median', 'min', 'max', 'count', 'length', 'stdev', 'stdevp', 'variance', 'varp', 'mad', 'quartile', 'corr', 'cov', 'sort', 'unique', 'join']);
+  const AGG_ALWAYS = new Set([...AGG].filter((x) => x !== 'min' && x !== 'max'));
+  const LISTVARS = new Set();
+
   const ALIAS = {
     arcsin: 'asin', arccos: 'acos', arctan: 'atan', arccot: 'acot', arcsec: 'asec', arccsc: 'acsc',
     arsinh: 'asinh', arcosh: 'acosh', artanh: 'atanh', arcsinh: 'asinh', arccosh: 'acosh', arctanh: 'atanh',
@@ -135,7 +210,7 @@
       if (/\s/.test(ch)) { i++; continue; }
       // number
       if (/[0-9]/.test(ch) || (ch === '.' && /[0-9]/.test(s[i + 1] || ''))) {
-        const m = /^(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?/.exec(s.slice(i));
+        const m = /^(?:\d+(?:\.(?!\.)\d*)?|\.\d+)(?:[eE][+-]?\d+)?/.exec(s.slice(i));
         let txt = m[0];
         // "2e" followed by non-digit handled since regex requires digits after e
         toks.push({ t: 'num', v: parseFloat(txt) });
@@ -199,8 +274,13 @@
       }
       if (ch === '!' && s[i + 1] === '=') { toks.push({ t: 'rel', v: '!=' }); i += 2; continue; }
       if ('+-*/^!'.includes(ch)) { toks.push({ t: 'op', v: ch }); i++; continue; }
-      if (ch === '(' || ch === '[') { toks.push({ t: 'lp' }); i++; continue; }
-      if (ch === ')' || ch === ']') { toks.push({ t: 'rp' }); i++; continue; }
+      if (ch === '(') { toks.push({ t: 'lp' }); i++; continue; }
+      if (ch === ')') { toks.push({ t: 'rp' }); i++; continue; }
+      if (ch === '[') { toks.push({ t: 'lbr' }); i++; continue; }
+      if (ch === ']') { toks.push({ t: 'rbr' }); i++; continue; }
+      if (s.startsWith('...', i)) { toks.push({ t: 'dots' }); i += 3; continue; }
+      if (ch === '\u2026') { toks.push({ t: 'dots' }); i++; continue; }
+      if (ch === '~') { toks.push({ t: 'rel', v: '~' }); i++; continue; }
       if (ch === '{') { toks.push({ t: 'lb' }); i++; continue; }
       if (ch === '}') { toks.push({ t: 'rb' }); i++; continue; }
       if (ch === ',') { toks.push({ t: 'comma' }); i++; continue; }
@@ -287,6 +367,16 @@
       for (;;) {
         if (is('op', '!')) { next(); node = { t: 'fact', a: node }; }
         else if (is('deg')) { next(); node = { t: 'bin', op: '*', a: node, b: { t: 'num', v: Math.PI / 180 } }; }
+        else if (is('lbr') && ['var', 'call', 'list', 'range', 'index'].includes(node.t)) {
+          next();
+          const savedAbs = absDepth; absDepth = 0;
+          const first = parseRelationOrExpr();
+          let idx = first;
+          if (is('dots')) { next(); idx = { t: 'range', a: first, b: parseExpr() }; }
+          absDepth = savedAbs;
+          expect('rbr', ']');
+          node = { t: 'index', a: node, idx };
+        }
         else break;
       }
       return node;
@@ -317,6 +407,25 @@
         return { t: 'call', n: 'abs', args: [inner] };
       }
       if (k.t === 'lb') return parsePiecewise();
+      if (k.t === 'lbr') {
+        next();
+        const savedAbs = absDepth; absDepth = 0;
+        let node;
+        if (is('rbr')) node = { t: 'list', items: [] };
+        else {
+          const first = parseExpr();
+          if (is('dots')) { next(); node = { t: 'range', a: first, b: parseExpr() }; }
+          else if (is('comma')) {
+            next();
+            const second = parseExpr();
+            if (is('dots')) { next(); node = { t: 'range', a: first, next: second, b: parseExpr() }; }
+            else { const items = [first, second]; while (is('comma')) { next(); items.push(parseExpr()); } node = { t: 'list', items }; }
+          } else node = { t: 'list', items: [first] };
+        }
+        absDepth = savedAbs;
+        expect('rbr', ']');
+        return node;
+      }
       if (k.t === 'lp') {
         next();
         const savedAbs = absDepth; absDepth = 0;
@@ -429,18 +538,23 @@
   }
 
   /* ---------------- AST analysis ---------------- */
+  function kids(n) {
+    switch (n.t) {
+      case 'bin': return [n.a, n.b];
+      case 'neg': case 'fact': return [n.a];
+      case 'call': return n.args;
+      case 'tuple': case 'list': return n.items;
+      case 'range': return [n.a, n.next, n.b].filter(Boolean);
+      case 'index': return [n.a, n.idx];
+      case 'rel': return n.parts;
+      case 'pw': return n.cases.flatMap((c) => [c.cond, c.val]).concat(n.def ? [n.def] : []);
+      default: return [];
+    }
+  }
   function walk(node, fn) {
     if (!node) return;
     fn(node);
-    switch (node.t) {
-      case 'bin': walk(node.a, fn); walk(node.b, fn); break;
-      case 'neg': case 'fact': walk(node.a, fn); break;
-      case 'call': node.args.forEach((a) => walk(a, fn)); break;
-      case 'tuple': node.items.forEach((a) => walk(a, fn)); break;
-      case 'pw': node.cases.forEach((c) => { walk(c.cond, fn); walk(c.val, fn); }); walk(node.def, fn); break;
-      case 'rel': node.parts.forEach((a) => walk(a, fn)); break;
-      default: break;
-    }
+    kids(node).forEach((k) => walk(k, fn));
   }
 
   // free variable names (excluding constants and bound variables)
@@ -465,7 +579,7 @@
         case 'tuple': n.items.forEach((a) => rec(a, b)); break;
         case 'pw': n.cases.forEach((c) => { rec(c.cond, b); rec(c.val, b); }); rec(n.def, b); break;
         case 'rel': n.parts.forEach((a) => rec(a, b)); break;
-        default: break;
+        default: kids(n).forEach((a) => rec(a, b)); break;
       }
     };
     rec(node, bound);
@@ -493,6 +607,9 @@
         case 'fact': return { t: 'fact', a: rec(n.a) };
         case 'tuple': return { t: 'tuple', items: n.items.map(rec) };
         case 'rel': return { t: 'rel', ops: n.ops, parts: n.parts.map(rec) };
+        case 'list': return { t: 'list', items: n.items.map(rec) };
+        case 'range': return { t: 'range', a: rec(n.a), next: n.next ? rec(n.next) : undefined, b: rec(n.b) };
+        case 'index': return { t: 'index', a: rec(n.a), idx: rec(n.idx) };
         case 'pw': return { t: 'pw', cases: n.cases.map((c) => ({ cond: rec(c.cond), val: rec(c.val) })), def: rec(n.def) };
         case 'call': {
           const args = n.args.map(rec);
@@ -514,7 +631,58 @@
   /* ---------------- code generation ---------------- */
   const jsId = (name) => 'L_' + name.replace(/[^A-Za-z0-9_]/g, (c) => '$' + c.charCodeAt(0).toString(16));
 
-  function gen(n, locals) {
+  function listValued(n, locals) {
+    locals = locals || new Set();
+    switch (n.t) {
+      case 'list': case 'range': return true;
+      case 'var': return !locals.has(n.n) && LISTVARS.has(n.n);
+      case 'index': return listValued(n.a, locals) && (n.idx.t === 'range' || n.idx.t === 'rel' || listValued(n.idx, locals));
+      case 'neg': case 'fact': return listValued(n.a, locals);
+      case 'bin': return listValued(n.a, locals) || listValued(n.b, locals);
+      case 'tuple': return n.items.some((i) => listValued(i, locals));
+      case 'call':
+        if (n.n === 'sort' || n.n === 'unique' || n.n === 'join') return true;
+        if (AGG.has(n.n) || SPECIAL.has(n.n)) return false;
+        return n.args.some((a) => listValued(a, locals));
+      default: return false;
+    }
+  }
+  function touches(n, locals) {
+    switch (n.t) {
+      case 'list': case 'range': case 'index': return true;
+      case 'var': return !locals.has(n.n) && LISTVARS.has(n.n);
+      case 'call': if (AGG_ALWAYS.has(n.n)) return true; return n.args.some((a) => touches(a, locals));
+      default: return kids(n).some((k) => touches(k, locals));
+    }
+  }
+  function gen(n, locals) { return touches(n, locals) ? genL(n, locals) : genFast(n, locals); }
+  function genL(n, locals) {
+    const g = (x) => gen(x, locals);
+    switch (n.t) {
+      case 'list': return '[' + n.items.map(g).join(',') + ']';
+      case 'range': return `H.range(${g(n.a)},${g(n.b)}${n.next ? ',' + g(n.next) : ''})`;
+      case 'index': return `H.index(${g(n.a)},${g(n.idx)})`;
+      case 'neg': return `H.neg(${g(n.a)})`;
+      case 'fact': return `H.bc(R.factorial,[${g(n.a)}])`;
+      case 'bin': return `H.bop(${JSON.stringify(n.op)},${g(n.a)},${g(n.b)})`;
+      case 'tuple': return n.items.length === 2 ? `H.pt(${g(n.items[0])},${g(n.items[1])})` : '[' + n.items.map(g).join(',') + ']';
+      case 'rel': {
+        const ps = n.parts.map(g);
+        const cs = n.ops.map((op, i) => `H.cmp(${JSON.stringify(op)},${ps[i]},${ps[i + 1]})`);
+        return cs.length === 1 ? cs[0] : `H.land(${cs.join(',')})`;
+      }
+      case 'call': {
+        if (SPECIAL.has(n.n)) return genFast(n, locals);
+        const a = n.args.map(g).join(',');
+        if (AGG.has(n.n)) return `R.${n.n}(${a})`;
+        if (n.n === 'logb') return `H.bc(R.logb,[${a}])`;
+        if (BUILTINS.has(n.n)) return `H.bc(R.${ALIAS[n.n] || n.n},[${a}])`;
+        return `H.bc(F[${JSON.stringify(n.n)}],[${a}])`;
+      }
+      default: return genFast(n, locals);
+    }
+  }
+  function genFast(n, locals) {
     switch (n.t) {
       case 'num': return Number.isFinite(n.v) ? '(' + n.v + ')' : (n.v > 0 ? 'Infinity' : '-Infinity');
       case 'var':
@@ -528,7 +696,7 @@
         if (n.op === '^') return `R.pow(${a},${b})`;
         return `(${a}${n.op}${b})`;
       }
-      case 'tuple': return '[' + n.items.map((i) => gen(i, locals)).join(',') + ']';
+      case 'tuple': return n.items.length === 2 ? `H.pt(${gen(n.items[0], locals)},${gen(n.items[1], locals)})` : '[' + n.items.map((i) => gen(i, locals)).join(',') + ']';
       case 'rel': {
         const ps = n.parts.map((p) => gen(p, locals));
         const chunks = [];
@@ -590,7 +758,7 @@
     const body = gen(ast, locals);
     const plist = params.map(jsId).join(',');
     // eslint-disable-next-line no-new-func
-    return new Function('R', 'V', 'F', `"use strict"; return (${plist})=>{try{return ${body};}catch(e){return NaN;}};`)(R, V, F);
+    return new Function('R', 'V', 'F', 'H', `"use strict"; return (${plist})=>{try{return ${body};}catch(e){return NaN;}};`)(R, V, F, H);
   }
 
   /* ---------------- number formatting ---------------- */
@@ -607,6 +775,6 @@
 
   global.ME = {
     R, V, F, BUILTINS, CONSTS, MathError, parseStatement, resolve, compile, freeVars, calledFns,
-    walk, fmt, DEG, tokenize, gen,
+    walk, fmt, DEG, tokenize, gen, LISTVARS, listValued, Pt, H, kids,
   };
 })(window);
