@@ -43,6 +43,13 @@
     <div id="tip"></div>
     <div id="coords"></div>
     <button id="btnExpand" class="ib float" title="Show expression list" aria-label="Show list" hidden></button>
+    <div id="curvebar" hidden>
+      <label><input type="checkbox" id="tTan"> Tangent</label>
+      <label><input type="checkbox" id="tSec"> Secant</label>
+      <span id="secCtl" hidden>Δx <input type="number" id="tH" value="1" step="0.1" aria-label="Secant spacing"></span>
+      <button id="tAdd" class="ghost" title="Add the line(s) to the expression list">+ Add line</button>
+      <div id="toolInfo"></div>
+    </div>
     <div class="gctrl">
       <button id="btnSettings" class="ib" title="Graph settings" aria-label="Graph settings"></button>
       <button id="btnHome" class="ib" title="Reset view" aria-label="Reset view"></button>
@@ -55,7 +62,20 @@
 <div id="gset" class="popover" hidden></div>
 <div id="toast" role="status"></div>
 <input type="file" id="fileIn" accept=".json,application/json" hidden>
+<script>
+/* Live formula editor (MathLive) is loaded from a CDN; if it is unavailable the app falls back to a plain-text editor. */
+window.mlReady = new Promise(function (resolve) {
+  var s = document.createElement('script');
+  s.src = 'https://cdn.jsdelivr.net/npm/mathlive@0.101.2/dist/mathlive.min.js';
+  s.integrity = 'sha384-doR79CNYg7NhrFTJr/dpigzFgtoi12M9/4MQnJAlJgKolmyikG+2s3hCkb5XgIKU';
+  s.crossOrigin = 'anonymous';
+  s.onload = function () { customElements.whenDefined('math-field').then(function () { resolve(true); }); };
+  s.onerror = function () { resolve(false); };
+  document.head.appendChild(s);
+});
+</script>
 <script src="js/mathengine.js"></script>
+<script src="js/latex.js"></script>
 <script src="js/graph.js"></script>
 <script src="js/app.js"></script>
 </body>

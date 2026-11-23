@@ -7,14 +7,14 @@
 </p>
 
 <p align="center">
-  <img src="assets/web-screenshot.jpg" width="900" alt="Web graphing calculator showing a slider-driven sine wave, a polar rose, a shaded inequality, a table with regression line">
+  <img src="assets/web-screenshot.jpg" width="900" alt="Web graphing calculator with typeset formulas, a slider-driven sine wave, a polar rose, a shaded inequality, a complex point and tangent/secant lines">
 </p>
 
 This repository contains two editions:
 
 | Edition | Where | Stack | Best for |
 | --- | --- | --- | --- |
-| 🌐 **Web** (recommended) | [`docs/`](docs/) · [live site](https://shivamhimatsingka.github.io/Graphical-Calculator/) | Plain HTML / CSS / JavaScript, no dependencies | Everything — full Desmos-style feature set, works on desktop, tablet and phone |
+| 🌐 **Web** (recommended) | [`docs/`](docs/) · [live site](https://shivamhimatsingka.github.io/Graphical-Calculator/) | Plain HTML / CSS / JavaScript (live formula editor via MathLive from a CDN, optional) | Everything — full Desmos-style feature set, works on desktop, tablet and phone |
 | 🖥️ **Desktop** | [`desktop/`](desktop/) | Python, PySide6, PyQtGraph, NumPy, SymPy | The original native app (functions, sliders, points, tracing) |
 
 ---
@@ -30,10 +30,16 @@ This repository contains two editions:
 * Points (drag them!), point lists, tables
 * Piecewise functions `{x<0: -x, x^2}` and domain restrictions `y = x^2 {x > 0}`
 
+**Live formula editor**
+
+* Type naturally and see typeset maths as you go: `x^2` raises a superscript, `/` builds a fraction, `sqrt` becomes √, `pi` → π, `<=` → ≤ … (powered by [MathLive](https://mathlive.io), loaded from a CDN)
+* Works with the on-screen keypad; falls back to a plain-text editor automatically if the CDN is unreachable (or switch under ⚙ → *Formula editor*)
+
 **Math engine**
 
 * Your own functions `f(x) = …`, derivatives `f'(x)`, numeric `int`, `sum`, `prod`, `nderiv`
 * Implicit multiplication (`2x`, `a(x+1)`, `sin 2x`, `sin^2(x)`), `|abs|`, `n!`, `30°`, `log_2(x)`
+* **Complex numbers**: `i`, `3+4i`, `(1+i)^2`, `e^(i*pi)`, `abs`, `arg`, `real`, `imag`, `conj`, and complex `sqrt/exp/ln/sin/cos…` — a complex value plots as a point
 * Radians / degrees mode
 
 **Sliders**
@@ -56,6 +62,7 @@ This repository contains two editions:
 **Exploring the graph**
 
 * Click a curve to see **zeros, extrema, y-intercept and intersections**; drag along it to trace
+* **Tangent and secant lines** at the traced point (adjustable Δx), with their equations — and a one-click *Add line* to put them in your list
 * Zoom (wheel / pinch), pan, scale a single axis by dragging along it, window settings, π-labelled axis
 * Light / dark theme
 
@@ -77,6 +84,7 @@ f(x) = x^3 - 3x               define a function, then use f(2) or f'(x)
 L = [1...10]                  list;  mean(L), L[L>5], (L, L^2)
 y_1 ~ m x_1 + b               regression on table 1
 int(0, 1, x^2)                integral;  sum(n,1,10,n^2) is a sum
+z = 3 + 4i                    complex number (plots as a point);  abs(z), conj(z), e^(i*pi/3)
 ```
 
 ### Run it locally
@@ -93,7 +101,7 @@ python3 -m http.server 8000 --directory docs
 ### Run the tests
 
 ```bash
-node tests/engine.test.js     # math-engine regression tests (needs Node 16+)
+npm test                      # or: node tests/engine.test.js && node tests/latex.test.js   (Node 16+)
 ```
 
 ---
@@ -128,12 +136,13 @@ Graphical-Calculator/
 │   ├── css/style.css
 │   └── js/
 │       ├── mathengine.js    #   tokenizer, parser, list/stat runtime, code generator
-│       ├── graph.js         #   canvas renderer & interaction (marching squares, POIs, tracing)
+│       ├── latex.js         #   LaTeX <-> text converters for the live formula editor
+│       ├── graph.js         #   canvas renderer & interaction (marching squares, POIs, tracing, tangents)
 │       └── app.js           #   UI, evaluation pipeline, sliders, tables, folders, regression
 ├── desktop/                 # 🖥️ Python/PySide6 edition
 │   ├── main.py
 │   └── requirements.txt
-├── tests/engine.test.js     # math-engine tests
+├── tests/                   # engine + LaTeX converter tests
 ├── assets/                  # README images
 ├── package.json             # `npm start` / `npm test` helpers
 ├── LICENSE
@@ -159,11 +168,12 @@ Graphical-Calculator/
 - [x] Animated sliders with adjustable ranges
 - [x] Undo / redo, save & load, image export, share links
 - [x] Dark mode
-- [ ] Live formula editor (currently plain-text input with formatted display)
-- [ ] Complex numbers
+- [x] Live formula editor
+- [x] Complex numbers
+- [x] Tangent / secant lines
+- [ ] Complex functions of a complex variable (domain colouring)
 - [ ] Actions / ticker
 - [ ] 3D graphs
-- [ ] Tangent / secant lines
 - [ ] Histograms, box plots and more statistics plots
 
 ---
@@ -181,7 +191,7 @@ Graphical-Calculator/
 Issues and pull requests are welcome.
 
 1. Fork the repo and create a branch.
-2. For the web app, edit files in `docs/` and run `node tests/engine.test.js`.
+2. For the web app, edit files in `docs/` and run `npm test`.
 3. Open a pull request describing the change.
 
 When reporting a bug please include your OS/browser (or Python version), the exact expression, what you expected and what happened — a screenshot helps.

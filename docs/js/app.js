@@ -31,10 +31,10 @@
   const playing = new Set();
   let graph = null;
   let curOrder = [];        // computed variable evaluation order
-  let lastInput = null;
+  let lastEd = null;
   let hist = [], hIdx = -1, commitTimer = 0, saveTimer = 0, evalTimer = 0;
 
-  function defaultSettings() { return { grid: true, minor: true, numbers: true, piX: false, deg: false, theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light' }; }
+  function defaultSettings() { return { editor: 'live', grid: true, minor: true, numbers: true, piX: false, deg: false, theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light' }; }
   function newItem(type, props) {
     const it = Object.assign({ id: nextId++, type, text: '', hidden: false, line: 'solid', width: 2.5 }, props || {});
     if (type === 'expr' || type === 'table') {
@@ -91,10 +91,18 @@
   function fmtValue(v) {
     if (Array.isArray(v)) return '[' + v.slice(0, 12).map(fmtValue).join(', ') + (v.length > 12 ? `, … (${v.length} items)` : '') + ']';
     if (v instanceof ME.Pt) return `(${fmt(v.x)}, ${fmt(v.y)})`;
+    if (v instanceof ME.Cx) {
+      const tiny = (a, b) => Math.abs(a) < 1e-12 * Math.max(1, Math.abs(b));
+      const re = tiny(v.re, v.im) ? 0 : v.re, im = tiny(v.im, v.re) ? 0 : v.im;
+      if (!im) return fmt(re);
+      const imS = Math.abs(im) === 1 ? '' : fmt(Math.abs(im));
+      return (re ? fmt(re) + (im < 0 ? ' − ' : ' + ') : (im < 0 ? '−' : '')) + imS + 'i';
+    }
     if (typeof v === 'boolean') return String(v);
     return typeof v === 'number' ? fmt(v) : 'undefined';
   }
-  const isPtVal = (v) => v instanceof ME.Pt || (Array.isArray(v) && v.length > 0 && v.every((q) => q instanceof ME.Pt));
+  const isPt1 = (q) => q instanceof ME.Pt || q instanceof ME.Cx;
+  const isPtVal = (v) => isPt1(v) || (Array.isArray(v) && v.length > 0 && v.every(isPt1));
 
   function solveLinear(M, b) {
     const n = b.length, A = M.map((r, i) => r.concat([b[i]]));
@@ -273,14 +281,17 @@
       }
     }
     // lists: table columns, then list-valued variable definitions (fixpoint)
-    ME.LISTVARS.clear();
+    ME.LISTVARS.clear(); ME.CXVARS.clear(); ME.CXFUNCS.clear();
+    for (const name of Object.keys(fnDefs)) { const fr = fnDefs[name]; if (fr.parts && ME.complexValued(fr.parts[1], new Set(fr.def.params))) ME.CXFUNCS.add(name); }
     const tableRecs = list.filter((r) => r.item.type === 'table');
     for (const tr of tableRecs) { const n = tr.item.tno; ['x', 'y'].forEach((c) => { ME.LISTVARS.add(`${c}_${n}`); V[`${c}_${n}`] = []; }); ME.LISTVARS.add(`e_${n}`); V[`e_${n}`] = []; }
     for (let guard = 0, changed = true; changed && guard < 12; guard++) {
       changed = false;
       for (const name of Object.keys(varDefs)) {
         const rec = varDefs[name];
-        if (!rec.isSlider && !ME.LISTVARS.has(name) && ME.listValued(rec.parts[1])) { ME.LISTVARS.add(name); changed = true; }
+        if (rec.isSlider) continue;
+        if (!ME.LISTVARS.has(name) && ME.listValued(rec.parts[1])) { ME.LISTVARS.add(name); changed = true; }
+        if (!ME.CXVARS.has(name) && ME.complexValued(rec.parts[1])) { ME.CXVARS.add(name); changed = true; }
       }
     }
     // functions
@@ -506,13 +517,82 @@
     });
     item.text = `(${texts[0]}, ${texts[1]})`;
     const row = rows.get(item.id);
-    if (row) { row.inp.value = item.text; updatePretty(row); }
+    if (row) row.ed.set(item.text);
     scheduleEval(true);
     commitSoon(); saveSoon();
   }
 
+  /* ================= editors ================= */
+  const useMath = () => !!window.__mlOK && state.settings.editor !== 'text';
+  function plainEd(inp) {
+    return {
+      kind: 'text', el: inp,
+      get: () => inp.value,
+      set(v) { if (inp.value !== v) inp.value = v; },
+      queueSet(v) { this.set(v); },
+      focus(end) { inp.focus(); if (end) { try { inp.setSelectionRange(inp.value.length, inp.value.length); } catch (e) { /* noop */ } } },
+      blur() { inp.blur(); },
+      insert(txt, back) {
+        inp.focus(); inp.setRangeText(txt, inp.selectionStart, inp.selectionEnd, 'end');
+        if (back) { const p = inp.selectionStart - back; inp.setSelectionRange(p, p); }
+        inp.dispatchEvent(new Event('input', { bubbles: true }));
+      },
+      backspace() {
+        inp.focus(); const a = inp.selectionStart, b = inp.selectionEnd;
+        if (a !== b) inp.setRangeText('', a, b, 'end'); else if (a > 0) inp.setRangeText('', a - 1, a, 'end');
+        inp.dispatchEvent(new Event('input', { bubbles: true }));
+      },
+    };
+  }
+  const STD_FN = new Set(['sin', 'cos', 'tan', 'sec', 'csc', 'cot', 'sinh', 'cosh', 'tanh', 'coth', 'ln', 'log', 'exp', 'min', 'max', 'gcd']);
+  function mathInsert(mf, txt, back) {
+    mf.focus();
+    const typed = (t) => mf.executeCommand(['typedText', t]);
+    const ins = (l) => mf.insert(l, { selectionMode: 'placeholder', focus: true, format: 'latex' });
+    let m;
+    if (txt === '^2') { typed('^2'); mf.executeCommand('moveToNextChar'); return; }
+    if (txt === '^()') { typed('^'); return; }
+    if (txt === '_1') { typed('_1'); mf.executeCommand('moveToNextChar'); return; }
+    if (txt === 'sqrt()') { ins('\\sqrt{#?}'); return; }
+    if (txt === '||') { ins('\\left|#?\\right|'); return; }
+    if (txt === 'pi') { ins('\\pi'); return; }
+    if (txt === 'theta') { ins('\\theta'); return; }
+    if (txt === '<=') { ins('\\le'); return; }
+    if (txt === '>=') { ins('\\ge'); return; }
+    if (txt === '*') { ins('\\cdot'); return; }
+    if (txt === '°') { ins('\\degree'); return; }
+    if (txt === '[]') { ins('\\lbrack #?\\rbrack'); return; }
+    if (txt === '{}') { ins('\\lbrace #?\\rbrace'); return; }
+    if (txt === 'sum(n,1,10,n)') { ins('\\operatorname{sum}\\left(n,1,10,n\\right)'); return; }
+    if (txt === 'int(0,1,x)') { ins('\\operatorname{int}\\left(0,1,x\\right)'); return; }
+    if ((m = /^([A-Za-z]+)\(\)$/.exec(txt))) { const n = m[1]; ins(STD_FN.has(n) ? `\\${n}\\left(#?\\right)` : n.length === 1 ? `${n}\\left(#?\\right)` : `\\operatorname{${n}}\\left(#?\\right)`); return; }
+    typed(txt);
+  }
+  function mathEd(mf) {
+    let pend = null, timer = 0;
+    const ed = {
+      kind: 'math', el: mf,
+      get: () => LX.latexToText(mf.getValue('latex')),
+      set(text) {
+        if (document.activeElement === mf && ed.get() === text) return;
+        const l = LX.textToLatex(text);
+        if (mf.getValue('latex') !== l) { try { mf.setValue(l, { silenceNotifications: true }); } catch (e) { mf.value = l; } }
+      },
+      queueSet(text) { pend = text; if (timer) return; timer = setTimeout(() => { timer = 0; if (pend !== null) { ed.set(pend); pend = null; } }, 120); },
+      focus(end) { mf.focus(); if (end) { try { mf.executeCommand('moveToMathfieldEnd'); } catch (e) { /* noop */ } } },
+      blur() { mf.blur(); },
+      insert(txt, back) { mathInsert(mf, txt, back); },
+      backspace() { mf.focus(); mf.executeCommand('deleteBackward'); },
+    };
+    return ed;
+  }
+  function configureMathLive() {
+    try { MathfieldElement.soundsDirectory = null; MathfieldElement.plonkSound = null; MathfieldElement.keypressSound = null; } catch (e) { /* noop */ }
+  }
+
   /* ================= row ui ================= */
   function updatePretty(row) {
+    if (!row.pretty) return;
     const v = row.inp.value;
     row.pretty.innerHTML = pretty(v);
     row.field.classList.toggle('show-pretty', !!v);
@@ -605,15 +685,25 @@
     row.num = $('.num', e); row.dot = $('.dot', e);
     const main = $('.main', e);
     if (item.type === 'expr') {
+      const math = useMath();
       main.innerHTML = `
-        <div class="field"><div class="pretty"></div><input class="in" type="text" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" placeholder="Type an expression, e.g. y = x^2"></div>
+        <div class="field${math ? ' math' : ''}">${math ? '<math-field class="in mf"></math-field>' : '<div class="pretty"></div><input class="in" type="text" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" placeholder="Type an expression, e.g. y = x^2">'}</div>
         <div class="msg"></div>
         <div class="slider"><input class="lim smin" aria-label="Slider minimum"><input type="range" aria-label="Slider"><input class="lim smax" aria-label="Slider maximum"><button class="play" title="Animate">▶</button></div>`;
       row.field = $('.field', main); row.pretty = $('.pretty', main); row.inp = $('.in', main);
       row.msg = $('.msg', main); row.range = $('input[type=range]', main);
       row.smin = $('.smin', main); row.smax = $('.smax', main); row.play = $('.play', main);
-      row.inp.value = item.text;
-      updatePretty(row);
+      if (math) {
+        const mf = row.inp;
+        mf.mathVirtualKeyboardPolicy = 'manual'; mf.smartFence = true; mf.smartSuperscript = true; mf.removeExtraneousParentheses = true;
+        mf.setAttribute('placeholder', '\\text{Type an expression, e.g. y = x²}');
+        row.ed = mathEd(mf);
+        setTimeout(() => row.ed.set(item.text), 0);
+      } else {
+        row.ed = plainEd(row.inp);
+        const base = row.ed.set; row.ed.set = (v) => { base.call(row.ed, v); updatePretty(row); };
+        row.inp.value = item.text; updatePretty(row);
+      }
       wireExprRow(item, row);
     } else if (item.type === 'note') {
       main.innerHTML = '<textarea class="note" rows="1" placeholder="Add a note…"></textarea><div class="msg"></div>';
@@ -622,14 +712,14 @@
       const fit = () => { row.ta.style.height = 'auto'; row.ta.style.height = row.ta.scrollHeight + 'px'; };
       row.ta.addEventListener('input', () => { item.text = row.ta.value; fit(); commitSoon(); saveSoon(); });
       setTimeout(fit, 0);
-      row.inp = row.ta;
+      row.inp = row.ta; row.ed = plainEd(row.ta);
     } else if (item.type === 'table') {
       buildTable(item, row, main);
     } else if (item.type === 'folder') {
       e.classList.add('is-folder');
       main.innerHTML = '<div class="ftitle"><button class="fold" aria-label="Collapse or expand folder">▾</button><input class="in ftext" type="text" spellcheck="false" placeholder="Folder name"></div>';
       row.fold = $('.fold', main); row.inp = $('.ftext', main); row.msg = el('div');
-      row.inp.value = item.text;
+      row.inp.value = item.text; row.ed = plainEd(row.inp);
       row.inp.addEventListener('input', () => { item.text = row.inp.value; commitSoon(); saveSoon(); });
       row.inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); addItem('expr', item.id); } });
       row.fold.addEventListener('click', () => { item.collapsed = !item.collapsed; applyFolderState(); saveSoon(); commitSoon(); });
@@ -638,27 +728,31 @@
     row.dot.addEventListener('click', () => { item.hidden = !item.hidden; evaluate(); commitSoon(); saveSoon(); });
     $('.gear', e).addEventListener('click', (ev) => openItemPopover(item, ev.currentTarget));
     $('.del', e).addEventListener('click', () => deleteItem(item.id));
-    e.addEventListener('focusin', () => { document.querySelectorAll('.row.focus').forEach((r) => r.classList.remove('focus')); e.classList.add('focus'); if (row.inp) lastInput = row.inp; });
+    e.addEventListener('focusin', (ev) => { document.querySelectorAll('.row.focus').forEach((r) => r.classList.remove('focus')); e.classList.add('focus'); const t = ev.target; if (row.ed && (t === row.ed.el || (row.ed.el.contains && row.ed.el.contains(t)))) lastEd = row.ed; else if (t && t.matches && t.matches('input:not([type=range]):not([type=checkbox]),textarea')) lastEd = plainEd(t); else if (row.ed) lastEd = row.ed; });
     e.addEventListener('focusout', () => setTimeout(() => { if (!e.contains(document.activeElement)) e.classList.remove('focus'); }, 0));
     rows.set(item.id, row);
     return e;
   }
 
   function wireExprRow(item, row) {
+    const ed = row.ed;
     row.inp.addEventListener('input', () => {
-      item.text = row.inp.value;
+      item.text = ed.get();
       updatePretty(row);
       scheduleEval();
       commitSoon(); saveSoon();
     });
     row.inp.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Enter') { ev.preventDefault(); addItem('expr', item.id); }
-      else if (ev.key === 'Backspace' && !row.inp.value && state.items.length > 1) { ev.preventDefault(); const prev = state.items[state.items.findIndex((i) => i.id === item.id) - 1]; deleteItem(item.id); if (prev) focusItem(prev.id); }
-      else if (ev.key === 'ArrowUp' || ev.key === 'ArrowDown') {
+      const math = ed.kind === 'math';
+      const handled = () => { ev.preventDefault(); if (math) ev.stopPropagation(); };
+      if (ev.key === 'Enter') { handled(); addItem('expr', item.id); }
+      else if (ev.key === 'Backspace' && !ed.get() && state.items.length > 1) { handled(); const prev = state.items[state.items.findIndex((i) => i.id === item.id) - 1]; deleteItem(item.id); if (prev) focusItem(prev.id); }
+      else if ((ev.key === 'ArrowUp' || ev.key === 'ArrowDown') && (!math || !ed.get())) {
         const i = state.items.findIndex((x) => x.id === item.id) + (ev.key === 'ArrowUp' ? -1 : 1);
-        if (state.items[i]) { ev.preventDefault(); focusItem(state.items[i].id); }
-      } else if (ev.key === 'Escape') row.inp.blur();
-    });
+        if (state.items[i]) { handled(); focusItem(state.items[i].id); }
+      } else if (ev.key === 'Escape') { ed.blur(); }
+      else if (math && ev.key === '/' && !ev.ctrlKey && !ev.metaKey && !ev.altKey) { handled(); ed.el.insert('\\frac{#@}{#?}', { selectionMode: 'placeholder', format: 'latex', focus: true }); }
+    }, ed.kind === 'math');
     row.msg.addEventListener('click', (ev) => {
       const b = ev.target.closest('[data-slider]'); if (!b) return;
       const name = b.dataset.slider;
@@ -688,7 +782,7 @@
     const sl = item.slider;
     if (v < sl.min) sl.min = Math.floor(v); if (v > sl.max) sl.max = Math.ceil(v);
     const row = rows.get(item.id);
-    if (row) { row.inp.value = item.text; updatePretty(row); if (document.activeElement !== row.range) row.range.value = v; syncSliderUI(rec); }
+    if (row) { row.ed.queueSet(item.text); if (document.activeElement !== row.range) row.range.value = v; syncSliderUI(rec); }
     recomputeVars();
     refreshReadouts();
     graph.requestDraw(true);
@@ -779,7 +873,7 @@
   }
   function focusItem(id) {
     const r = rows.get(id); if (!r) return;
-    const t = r.inp || r.ta; if (t) { t.focus(); try { t.setSelectionRange(t.value.length, t.value.length); } catch (e) { /* noop */ } }
+    if (r.ed) r.ed.focus(true); else if (r.inp) r.inp.focus();
     r.el.scrollIntoView({ block: 'nearest' });
   }
   function deleteItem(id) {
@@ -930,6 +1024,7 @@
         <label>Minor gridlines <input type="checkbox" data-t="minor" ${S.minor ? 'checked' : ''}></label>
         <label>Axis numbers <input type="checkbox" data-t="numbers" ${S.numbers ? 'checked' : ''}></label>
         <label>X-axis in multiples of π <input type="checkbox" data-t="piX" ${S.piX ? 'checked' : ''}></label></div>
+      <div class="sec"><h4>Formula editor</h4><div class="seg" data-seg="editor"><button data-v="live" class="${S.editor === 'text' ? '' : 'on'}"${window.__mlOK ? '' : ' disabled title="Unavailable offline"'}>Live (typeset)</button><button data-v="text" class="${S.editor === 'text' ? 'on' : ''}">Plain text</button></div></div>
       <div class="sec"><h4>Angle unit</h4><div class="seg" data-seg="ang"><button data-v="rad" class="${S.deg ? '' : 'on'}">Radians</button><button data-v="deg" class="${S.deg ? 'on' : ''}">Degrees</button></div></div>
       <div class="sec"><h4>Theme</h4><div class="seg" data-seg="theme"><button data-v="light" class="${S.theme === 'light' ? 'on' : ''}">Light</button><button data-v="dark" class="${S.theme === 'dark' ? 'on' : ''}">Dark</button></div></div>`;
     place(pop, $('#btnSettings'));
@@ -940,6 +1035,7 @@
     });
     pop.querySelectorAll('[data-t]').forEach((inp) => inp.onchange = () => { S[inp.dataset.t] = inp.checked; applySettings(); saveSoon(); });
     pop.querySelectorAll('[data-seg="ang"] button').forEach((b) => b.onclick = () => { S.deg = b.dataset.v === 'deg'; pop.querySelectorAll('[data-seg="ang"] button').forEach((x) => x.classList.toggle('on', x === b)); evaluate(); commitSoon(); saveSoon(); });
+    pop.querySelectorAll('[data-seg="editor"] button').forEach((b) => b.onclick = () => { if (b.disabled) return; S.editor = b.dataset.v; pop.hidden = true; renderList(); evaluate(); saveSoon(); });
     pop.querySelectorAll('[data-seg="theme"] button').forEach((b) => b.onclick = () => { S.theme = b.dataset.v; pop.querySelectorAll('[data-seg="theme"] button').forEach((x) => x.classList.toggle('on', x === b)); applySettings(); evaluate(); saveSoon(); });
   }
 
@@ -960,6 +1056,8 @@
     ['Implicit curves', ['x^2+y^2=25', 'x^3+y^3=3 x y', 'y^2=x^3-3x+3']],
     ['Calculus: f, f\' and area', ['f(x)=x^3-3x', 'y=f\'(x)', 'y=f(x){-2<=x<=1}', 'int(0,2,f(x))']],
     ['Piecewise & restrictions', ['y={x<0:-x, x^2}', 'y=2{1<=x<=4}', 'x=-3{-2<=y<=2}']],
+    ['Complex numbers', ['z=3+4i', 'abs(z)', 'arg(z)', 'conj(z)', 'w=z*i', 'e^(i*pi/3)', '(1+i)^2']],
+    ['Tangent & secant lines', ['y=x^3/6-x', { type: 'note', text: 'Click the curve, then switch on Tangent / Secant in the bar at the bottom.' }]],
     ['Folders', [{ type: 'folder', text: 'Circle' }, 'x^2+y^2=4', '(0,0)', { type: 'folder', text: 'Parabola' }, 'y=x^2-2', 'y=-x^2+2']],
     ['Random & distributions', ['y=normpdf(x)', 'y=normpdf(x,1.5,0.6)', 'normcdf(1.96)', 'binompdf(10,0.5,5)', 'invnorm(0.975)', 'R=random(6)', 'shuffle([1...6])']],
     ['Many curves from a list', ['L=[1...5]', 'y=L sin(x)/2']],
@@ -1012,7 +1110,7 @@
   function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 1800); }
 
   function showHelp() {
-    const it = newItem('note', { text: 'Syntax cheat-sheet\n• y = x^2, x = y^2, r = 2 sin(3θ)\n• Implicit: x^2 + y^2 = 4   Inequality: y < sin(x), 1 < x < 3\n• Parametric: (cos(t), sin(t)){0<=t<=2π}\n• Points: (1, 2) — drag them!\n• Functions: f(x) = x^2, then f(3) or f\'(x)\n• Sliders: type a new letter (a x) and click “add slider”\n• Restrict a domain: y = x^2 {x > 0}   Piecewise: y = {x<0: -x, x}\n• Lists: L=[1...10], [2,4...20], L^2, L[3], L[L>5], (L, L^2)\n• Stats: mean, median, total, stdev, variance, quartile, corr, cov, sort, join, unique, count\n• Tables make lists x_1, y_1 — fit with  y_1 ~ m x_1 + b  (any model, e.g. a*e^(b x_1))\n• sum(n,1,10,n^2)   int(0,1,x^2)   abs, sqrt, ln, log, nCr, floor …\n• Folders: + → Folder, then drag rows (grip = the number column) to reorder or move into folders\n• random(), random(5), shuffle(L), normpdf/normcdf/invnorm, binompdf/binomcdf, poissonpdf/poissoncdf\n• Residuals after a regression: e_1 → (x_1, e_1)\n• Click a curve for zeros, extrema & intersections' });
+    const it = newItem('note', { text: 'Syntax cheat-sheet\n• y = x^2, x = y^2, r = 2 sin(3θ)\n• Implicit: x^2 + y^2 = 4   Inequality: y < sin(x), 1 < x < 3\n• Parametric: (cos(t), sin(t)){0<=t<=2π}\n• Points: (1, 2) — drag them!\n• Functions: f(x) = x^2, then f(3) or f\'(x)\n• Sliders: type a new letter (a x) and click “add slider”\n• Restrict a domain: y = x^2 {x > 0}   Piecewise: y = {x<0: -x, x}\n• Lists: L=[1...10], [2,4...20], L^2, L[3], L[L>5], (L, L^2)\n• Stats: mean, median, total, stdev, variance, quartile, corr, cov, sort, join, unique, count\n• Tables make lists x_1, y_1 — fit with  y_1 ~ m x_1 + b  (any model, e.g. a*e^(b x_1))\n• sum(n,1,10,n^2)   int(0,1,x^2)   abs, sqrt, ln, log, nCr, floor …\n• Folders: + → Folder, then drag rows (grip = the number column) to reorder or move into folders\n• random(), random(5), shuffle(L), normpdf/normcdf/invnorm, binompdf/binomcdf, poissonpdf/poissoncdf\n• Residuals after a regression: e_1 → (x_1, e_1)\n• Complex numbers: i, 3+4i, abs(z), arg(z), conj(z), e^(i*pi); a complex value plots as a point\n• Click a curve for tangent & secant lines (bar at the bottom), zeros, extrema & intersections' });
     state.items.unshift(it); $('#list').insertBefore(createRow(it), $('#list').firstChild); evaluate(); commitSoon(); saveSoon();
     $('#list').scrollTop = 0;
   }
@@ -1045,22 +1143,16 @@
       kpInsert(t.dataset.ins, +t.dataset.back);
     });
   }
-  function activeInput() {
-    if (lastInput && document.body.contains(lastInput)) return lastInput;
-    const last = state.items[state.items.length - 1]; const r = rows.get(last.id); return r && r.inp;
+  function activeEd() {
+    if (lastEd && document.body.contains(lastEd.el)) return lastEd;
+    const last = state.items[state.items.length - 1]; const r = rows.get(last.id); return r && r.ed;
   }
   function kpInsert(txt, back) {
-    const inp = activeInput(); if (!inp) return;
-    inp.focus();
-    if (txt === '\n') { const id = +inp.closest('.row').dataset.id; addItem('expr', id); return; }
-    if (txt === '\b') {
-      const s = inp.selectionStart, e = inp.selectionEnd;
-      if (s !== e) inp.setRangeText('', s, e, 'end'); else if (s > 0) inp.setRangeText('', s - 1, s, 'end');
-    } else {
-      inp.setRangeText(txt, inp.selectionStart, inp.selectionEnd, 'end');
-      if (back) { const p = inp.selectionStart - back; inp.setSelectionRange(p, p); }
-    }
-    inp.dispatchEvent(new Event('input', { bubbles: true }));
+    const ed = activeEd(); if (!ed) return;
+    ed.el.focus();
+    if (txt === '\n') { const rowEl = ed.el.closest('.row'); if (rowEl) addItem('expr', +rowEl.dataset.id); return; }
+    if (txt === '\b') { ed.backspace(); return; }
+    ed.insert(txt, back);
   }
 
   function moveItem(id, targetId, after) {
@@ -1123,7 +1215,16 @@
           const dec = clamp(Math.ceil(Math.log10(Math.max(graph.view.sx, graph.view.sy))) + 1, 0, 8);
           coords.textContent = `(${x.toFixed(dec)}, ${y.toFixed(dec)})`;
         },
-        onSelect: () => { /* reserved */ },
+        onSelect: (id) => { const p = graph.plots.find((q) => q.id === id); $('#curvebar').hidden = !(p && p.kind === 'fx'); if (!p || p.kind !== 'fx') $('#toolInfo').textContent = ''; },
+        onTools: (info) => {
+          const f = (v) => fmt(v, 5);
+          const eq = (m, b) => `y = ${f(m)}x ${b < 0 ? '−' : '+'} ${f(Math.abs(b))}`;
+          let t = '';
+          if (info && info.tangent) t += `Tangent at x = ${f(info.tangent.x0)}:  ${eq(info.tangent.m, info.tangent.b)}`;
+          if (info && info.secant) t += `${t ? '\n' : ''}Secant to x = ${f(info.secant.x1)}:  ${eq(info.secant.m, info.secant.b)}`;
+          const el2 = $('#toolInfo'); if (el2.textContent !== t) el2.textContent = t;
+          graph.toolInfo = info;
+        },
       },
     });
     graph.resize();
@@ -1163,6 +1264,18 @@
       rd.readAsText(f); e.target.value = '';
     };
 
+    // tangent / secant bar
+    const syncTools = () => { graph.tools.tangent = $('#tTan').checked; graph.tools.secant = $('#tSec').checked; $('#secCtl').hidden = !graph.tools.secant; graph.drawOverlay(); };
+    $('#tTan').onchange = syncTools; $('#tSec').onchange = syncTools;
+    $('#tH').oninput = () => { const v = parseFloat($('#tH').value); if (Number.isFinite(v) && v !== 0) { graph.tools.h = v; graph.drawOverlay(); } };
+    $('#tAdd').onclick = () => {
+      const inf = graph.toolInfo; if (!inf) { toast('Click a curve first, then turn on Tangent or Secant'); return; }
+      const line = (o) => `y=${fmt(o.m, 6)}x${o.b < 0 ? '-' : '+'}${fmt(Math.abs(o.b), 6)}`;
+      const last = state.items[state.items.length - 1];
+      if (inf.tangent) addItem('expr', last && last.id, line(inf.tangent));
+      if (inf.secant) addItem('expr', state.items[state.items.length - 1].id, line(inf.secant));
+      toast('Line added to the list');
+    };
     // dismiss popovers
     document.addEventListener('pointerdown', (e) => {
       if (e.target.closest('.popover, .menu, #btnAdd, #btnMenu, #btnSettings, .gear')) return;
@@ -1188,8 +1301,16 @@
     setupDnD();
     window.addEventListener('resize', () => graph.resize());
     if (innerWidth < 720) $('#btnKeypad').textContent = '⌨';
-    window.__gc = { state: () => state, recs, graph, evaluate, setText: (i, t) => { const it = state.items[i]; it.text = t; const r = rows.get(it.id); r.inp.value = t; updatePretty(r); evaluate(); } };
+    window.__gc = { state: () => state, recs, graph, evaluate, rows, setText: (i, t) => { const it = state.items[i]; it.text = t; const r = rows.get(it.id); r.ed.set(t); evaluate(); } };
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+  async function boot() {
+    try {
+      const timeout = new Promise((r) => setTimeout(() => r(false), 6000));
+      window.__mlOK = !!(window.mlReady && await Promise.race([window.mlReady, timeout]));
+    } catch (e) { window.__mlOK = false; }
+    if (window.__mlOK) configureMathLive();
+    init();
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
 })();

@@ -53,6 +53,16 @@ check('binompdf(10,0.5,5)', 252 / 1024); check('binomcdf(2,0.5,1)', 0.75); check
 check('expcdf(1)', 1 - Math.exp(-1)); check('unifcdf(0.25)', 0.25);
 check('count(random(5))', 5); check('count(shuffle([1...6]))', 6); check('total(shuffle([1...6]))', 21);
 
+// complex numbers
+function cx(src, re, im) {
+  let got; try { got = value(src); } catch (e) { got = 'ERR ' + e.message; }
+  const c = typeof got === 'number' ? { re: got, im: 0 } : got;
+  if (c && near(c.re, re) && Math.abs(c.im - im) < 1e-9) pass++; else fails.push(`${src}  expected ${re}+${im}i  got ${JSON.stringify(got)}`);
+}
+cx('i^2', -1, 0); cx('3+4i', 3, 4); cx('(3+4i)(1-2i)', 11, -2); cx('(1+i)^2', 0, 2); cx('1/i', 0, -1); cx('conj(3+4i)', 3, -4);
+cx('e^(i pi)', -1, 0); cx('sin(i)', 0, Math.sinh(1)); cx('sum(n,1,4,i^n)', 0, 0); cx('sum(i,1,4,i)', 10, 0);
+check('abs(3+4i)', 5); check('real(3+4i)', 3); check('imag(3+4i)', 4); check('arg(i)', Math.PI / 2);
+
 // parser errors
 for (const bad of ['2+', '(1', 'sin(', '1 $ 2']) {
   try { ME.parseStatement(bad, []); fails.push(`"${bad}" should not parse`); } catch (e) { pass++; }

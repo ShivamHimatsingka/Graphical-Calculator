@@ -114,6 +114,52 @@
     for (let i = 0; i < n; i++) out[i] = bcast(fn, args.map((a) => (isA(a) ? a[i] : a)));
     return out;
   }
+  /* ---- complex numbers ---- */
+  class Cx { constructor(re, im) { this.re = re; this.im = im; } }
+  const mkC = (re, im) => (im === 0 ? re : new Cx(re, im));
+  const toC = (a) => (a instanceof Cx ? a : new Cx(a, 0));
+  const cabs = (z) => Math.hypot(z.re, z.im);
+  const carg = (z) => Math.atan2(z.im, z.re);
+  const cmulR = (a, b) => new Cx(a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re);
+  const cdivR = (a, b) => { const d = b.re * b.re + b.im * b.im; return new Cx((a.re * b.re + a.im * b.im) / d, (a.im * b.re - a.re * b.im) / d); };
+  const cexpR = (z) => { const m = Math.exp(z.re); return new Cx(m * Math.cos(z.im), m * Math.sin(z.im)); };
+  const clnR = (z) => new Cx(Math.log(cabs(z)), carg(z));
+  function csqrtR(z) {
+    if (z.im === 0) return z.re >= 0 ? new Cx(Math.sqrt(z.re), 0) : new Cx(0, Math.sqrt(-z.re));
+    const r = cabs(z);
+    return new Cx(Math.sqrt((r + z.re) / 2), Math.sign(z.im) * Math.sqrt((r - z.re) / 2));
+  }
+  function cpowR(a, b) {
+    if (b.im === 0 && Number.isInteger(b.re) && Math.abs(b.re) <= 64) {
+      let n = Math.abs(b.re), base = a, res = new Cx(1, 0);
+      while (n) { if (n & 1) res = cmulR(res, base); base = cmulR(base, base); n >>= 1; }
+      return b.re < 0 ? cdivR(new Cx(1, 0), res) : res;
+    }
+    if (a.re === 0 && a.im === 0) return b.re > 0 ? new Cx(0, 0) : new Cx(NaN, NaN);
+    return cexpR(cmulR(b, clnR(a)));
+  }
+  const CF = {
+    sqrt: (z) => csqrtR(toC(z)), exp: (z) => cexpR(toC(z)), ln: (z) => clnR(toC(z)),
+    log: (z) => { const l = clnR(toC(z)); return new Cx(l.re / Math.LN10, l.im / Math.LN10); },
+    sin: (z) => { z = toC(z); return new Cx(Math.sin(z.re) * Math.cosh(z.im), Math.cos(z.re) * Math.sinh(z.im)); },
+    cos: (z) => { z = toC(z); return new Cx(Math.cos(z.re) * Math.cosh(z.im), -Math.sin(z.re) * Math.sinh(z.im)); },
+    tan: (z) => cdivR(CF.sin(z), CF.cos(z)),
+    sinh: (z) => { z = toC(z); return new Cx(Math.sinh(z.re) * Math.cos(z.im), Math.cosh(z.re) * Math.sin(z.im)); },
+    cosh: (z) => { z = toC(z); return new Cx(Math.cosh(z.re) * Math.cos(z.im), Math.sinh(z.re) * Math.sin(z.im)); },
+    tanh: (z) => cdivR(CF.sinh(z), CF.cosh(z)),
+    abs: (z) => cabs(toC(z)), arg: (z) => carg(toC(z)),
+    real: (z) => toC(z).re, imag: (z) => toC(z).im, conj: (z) => { z = toC(z); return new Cx(z.re, -z.im); },
+  };
+  function cop(op, a, b) {
+    a = toC(a); b = toC(b);
+    switch (op) {
+      case '+': return new Cx(a.re + b.re, a.im + b.im);
+      case '-': return new Cx(a.re - b.re, a.im - b.im);
+      case '*': return cmulR(a, b);
+      case '/': return cdivR(a, b);
+      default: return cpowR(a, b);
+    }
+  }
   const OPF = { '+': (a, b) => a + b, '-': (a, b) => a - b, '*': (a, b) => a * b, '/': (a, b) => a / b, '^': (a, b) => R.pow(a, b) };
   const CMP = { '<': (a, b) => a < b, '>': (a, b) => a > b, '<=': (a, b) => a <= b, '>=': (a, b) => a >= b, '=': (a, b) => Math.abs(a - b) < 1e-9, '!=': (a, b) => a !== b };
   const ptwise = (f) => (a, b) => {
@@ -130,8 +176,10 @@
   const H = {
     Pt, bc: bcast,
     pt: (x, y) => ((isA(x) || isA(y)) ? bcast((a, b) => new Pt(a, b), [x, y]) : new Pt(x, y)),
-    bop: (op, a, b) => bcast(ptwise(OPF[op]), [a, b]),
-    neg: (a) => bcast((x) => (x instanceof Pt ? new Pt(-x.x, -x.y) : -x), [a]),
+    I: new Cx(0, 1), Cx,
+    bop: (op, a, b) => bcast((x, y) => ((x instanceof Cx || y instanceof Cx) ? (() => { const r = cop(op, x, y); return mkC(r.re, r.im); })() : ptwise(OPF[op])(x, y)), [a, b]),
+    bcf: (name, args) => bcast((...v) => (v.some((x) => x instanceof Cx) ? (CF[name] ? (() => { const r = CF[name](...v); return r instanceof Cx ? mkC(r.re, r.im) : r; })() : NaN) : R[name](...v)), args),
+    neg: (a) => bcast((x) => (x instanceof Pt ? new Pt(-x.x, -x.y) : x instanceof Cx ? new Cx(-x.re, -x.im) : -x), [a]),
     cmp: (op, a, b) => bcast(CMP[op], [a, b]),
     land: (...xs) => bcast((...v) => v.every(Boolean), xs),
     range(a, b, next) {
@@ -205,6 +253,7 @@
   const binomP = (n, p, k) => (k < 0 || k > n || k !== Math.floor(k) ? 0 : Math.exp(lgamma(n + 1) - lgamma(k + 1) - lgamma(n - k + 1) + (k ? k * Math.log(p) : 0) + (n - k ? (n - k) * Math.log(1 - p) : 0)));
   const poisP = (l, k) => (k < 0 || k !== Math.floor(k) ? 0 : Math.exp(-l + (k ? k * Math.log(l) : 0) - lgamma(k + 1)));
   Object.assign(R, {
+    real: (a) => a, imag: () => 0, conj: (a) => a, arg: (a) => Math.atan2(0, a),
     erf,
     random: (n) => (n === undefined ? Math.random() : Array.from({ length: Math.max(0, Math.min(1e5, Math.floor(n))) }, () => Math.random())),
     shuffle: (L) => { const a = (isA(L) ? L : [L]).slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; },
@@ -224,6 +273,8 @@
   const AGG = new Set(['shuffle', 'total', 'mean', 'median', 'min', 'max', 'count', 'length', 'stdev', 'stdevp', 'variance', 'varp', 'mad', 'quartile', 'corr', 'cov', 'sort', 'unique', 'join']);
   const AGG_ALWAYS = new Set([...AGG].filter((x) => x !== 'min' && x !== 'max'));
   const LISTVARS = new Set();
+  const CXVARS = new Set();   // variables holding complex values
+  const CXFUNCS = new Set();  // user functions returning complex values
 
   const ALIAS = {
     arcsin: 'asin', arccos: 'acos', arctan: 'atan', arccot: 'acot', arcsec: 'asec', arccsc: 'acsc',
@@ -234,7 +285,7 @@
     !['pow', 'deriv', 'logb'].includes(k)));
   Object.keys(ALIAS).forEach((k) => BUILTINS.add(k));
   const SPECIAL = new Set(['sum', 'prod', 'int', 'nderiv']);
-  const CONSTS = { pi: Math.PI, e: Math.E, tau: 2 * Math.PI, infinity: Infinity };
+  const CONSTS = { pi: Math.PI, e: Math.E, tau: 2 * Math.PI, infinity: Infinity, i: 0 };
 
   /* ---------------- tokenizer ---------------- */
   class MathError extends Error {}
@@ -694,11 +745,24 @@
       default: return false;
     }
   }
+  const REAL_OF_COMPLEX = new Set(['abs', 'arg', 'real', 'imag']);
+  function complexValued(n, locals) {
+    locals = locals || new Set();
+    switch (n.t) {
+      case 'var': return !locals.has(n.n) && (n.n === 'i' || CXVARS.has(n.n));
+      case 'call':
+        if (REAL_OF_COMPLEX.has(n.n)) return false;
+        if (CXFUNCS.has(n.n)) return true;
+        if (SPECIAL.has(n.n)) return false;
+        return n.args.some((a) => complexValued(a, locals));
+      default: return kids(n).some((k) => complexValued(k, locals));
+    }
+  }
   function touches(n, locals) {
     switch (n.t) {
       case 'list': case 'range': case 'index': return true;
-      case 'var': return !locals.has(n.n) && LISTVARS.has(n.n);
-      case 'call': if (AGG_ALWAYS.has(n.n) || (n.n === 'random' && n.args.length)) return true; return n.args.some((a) => touches(a, locals));
+      case 'var': return !locals.has(n.n) && (n.n === 'i' || LISTVARS.has(n.n) || CXVARS.has(n.n));
+      case 'call': if (AGG_ALWAYS.has(n.n) || (n.n === 'random' && n.args.length) || CXFUNCS.has(n.n)) return true; return n.args.some((a) => touches(a, locals));
       default: return kids(n).some((k) => touches(k, locals));
     }
   }
@@ -723,7 +787,7 @@
         const a = n.args.map(g).join(',');
         if (AGG.has(n.n)) return `R.${n.n}(${a})`;
         if (n.n === 'logb') return `H.bc(R.logb,[${a}])`;
-        if (BUILTINS.has(n.n)) return `H.bc(R.${ALIAS[n.n] || n.n},[${a}])`;
+        if (BUILTINS.has(n.n)) return `H.bcf(${JSON.stringify(ALIAS[n.n] || n.n)},[${a}])`;
         return `H.bc(F[${JSON.stringify(n.n)}],[${a}])`;
       }
       default: return genFast(n, locals);
@@ -734,6 +798,7 @@
       case 'num': return Number.isFinite(n.v) ? '(' + n.v + ')' : (n.v > 0 ? 'Infinity' : '-Infinity');
       case 'var':
         if (locals.has(n.n)) return jsId(n.n);
+        if (n.n === 'i') return 'H.I';
         if (n.n in CONSTS) return n.n === 'infinity' ? 'Infinity' : '(' + CONSTS[n.n] + ')';
         return `V[${JSON.stringify(n.n)}]`;
       case 'neg': return '(-' + gen(n.a, locals) + ')';
@@ -770,7 +835,7 @@
           const v = specialVar(n);
           const inner = new Set(locals); inner.add(v);
           const isSum = n.n === 'sum';
-          return `((lo,hi)=>{let s=${isSum ? 0 : 1};if(hi-lo>1e6)return NaN;for(let ${jsId(v)}=Math.ceil(lo);${jsId(v)}<=hi;${jsId(v)}++){s${isSum ? '+' : '*'}=${gen(args[3], inner)};}return s;})(${gen(args[1], locals)},${gen(args[2], locals)})`;
+          return `((lo,hi)=>{let s=${isSum ? 0 : 1};if(hi-lo>1e6)return NaN;for(let ${jsId(v)}=Math.ceil(lo);${jsId(v)}<=hi;${jsId(v)}++){${touches(args[3], inner) ? `s=H.bop('${isSum ? '+' : '*'}',s,${gen(args[3], inner)})` : `s${isSum ? '+' : '*'}=${gen(args[3], inner)}`};}return s;})(${gen(args[1], locals)},${gen(args[2], locals)})`;
         }
         if (n.n === 'int') {
           if (args.length < 3) throw new MathError('int(from, to, expr)');
@@ -822,6 +887,6 @@
 
   global.ME = {
     R, V, F, BUILTINS, CONSTS, MathError, parseStatement, resolve, compile, freeVars, calledFns,
-    walk, fmt, DEG, tokenize, gen, LISTVARS, listValued, Pt, H, kids,
+    walk, fmt, DEG, tokenize, gen, LISTVARS, CXVARS, CXFUNCS, listValued, complexValued, Pt, Cx, H, kids,
   };
 })(window);

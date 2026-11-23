@@ -69,6 +69,7 @@
       this.trace = null;
       this.pinned = null;
       this.hoverInfo = null;
+      this.tools = { tangent: false, secant: false, h: 1 };
       this.interacting = false;
       this._raf = 0;
       this._idle = 0;
@@ -105,6 +106,7 @@
       const s = this.w / 20;
       this.view = { x0: 0, y0: 0, sx: s, sy: s };
       this._viewChanged(false);
+      this.autoFit = true;
     }
     zoomAt(px, py, fx, fy) {
       const v = this.view;
@@ -116,6 +118,7 @@
       this._viewChanged(true);
     }
     _viewChanged(fast) {
+      this.autoFit = false;
       if (this.cb.onView) this.cb.onView(this.range());
       this.requestDraw(fast);
     }
@@ -131,7 +134,8 @@
         c.width = Math.round(w * dpr); c.height = Math.round(h * dpr);
         c.style.width = w + 'px'; c.style.height = h + 'px';
       }
-      if (initial) { const s = w / 20; this.view = { x0: 0, y0: 0, sx: s, sy: s }; }
+      if (initial) { const s = w / 20; this.view = { x0: 0, y0: 0, sx: s, sy: s }; this.autoFit = true; }
+      else if (this.autoFit) { const s = w / 20; this.view = { x0: 0, y0: 0, sx: s, sy: s }; }
       this.requestDraw(false);
       if (this.cb.onView) this.cb.onView(this.range());
     }
@@ -410,7 +414,7 @@
     drawPoints(ctx, p) {
       let v;
       try { v = p.get(); } catch (e) { return; }
-      const list = (Array.isArray(v) ? v : [v]).filter((q) => q && Number.isFinite(q.x) && Number.isFinite(q.y)).slice(0, 50000);
+      const list = (Array.isArray(v) ? v : [v]).map((q) => (q && q.re !== undefined ? { x: q.re, y: q.im } : q)).filter((q) => q && Number.isFinite(q.x) && Number.isFinite(q.y)).slice(0, 50000);
       if (p.showLine && list.length > 1) {
         const seg = [];
         this.lineStyle(ctx, p);
@@ -660,11 +664,46 @@
         this.dot(ctx, X, Y, sel.color, 6);
         lab(this.trace.x, this.trace.y, `(${fmtCoord(this.trace.x)}, ${fmtCoord(this.trace.y)})`, sel.color);
       }
+      let info = null;
+      if (sel && sel.kind === 'fx' && this.trace && (this.tools.tangent || this.tools.secant)) info = this.drawTools(ctx, sel);
+      if (this.cb.onTools) this.cb.onTools(info);
       if (this.hoverPoint) {
         const q = this.hoverPoint;
         ctx.save(); ctx.beginPath(); ctx.arc(this.X(q.x), this.Y(q.y), 9, 0, TAU); ctx.strokeStyle = q.color; ctx.globalAlpha = 0.5; ctx.lineWidth = 3; ctx.stroke(); ctx.restore();
         lab(q.x, q.y, `(${fmtCoord(q.x)}, ${fmtCoord(q.y)})`, q.color);
       }
+    }
+
+    /* tangent & secant lines for the selected y=f(x) curve at the trace point */
+    drawTools(ctx, sel) {
+      const f = (x) => { const v = sel.f(x); return Number.isFinite(v) ? v : NaN; };
+      const x0 = this.trace.x, y0 = f(x0);
+      if (!Number.isFinite(y0)) return null;
+      const r = this.range();
+      const info = {};
+      const stroke = (m, px, py, dash, width) => {
+        const xa = r.xmin - 1, xb = r.xmax + 1;
+        ctx.save();
+        ctx.strokeStyle = sel.color; ctx.lineWidth = width; ctx.setLineDash(dash); ctx.globalAlpha = 0.9;
+        ctx.beginPath(); ctx.moveTo(this.X(xa), clamp(this.Y(py + m * (xa - px)), -1e6, 1e6)); ctx.lineTo(this.X(xb), clamp(this.Y(py + m * (xb - px)), -1e6, 1e6)); ctx.stroke();
+        ctx.restore();
+      };
+      if (this.tools.tangent) {
+        const h = 1e-5 * Math.max(1, Math.abs(x0));
+        const m = (f(x0 + h) - f(x0 - h)) / (2 * h);
+        if (Number.isFinite(m)) { stroke(m, x0, y0, [7, 5], 2); info.tangent = { m, b: y0 - m * x0, x0, y0 }; }
+      }
+      if (this.tools.secant && Number.isFinite(this.tools.h) && this.tools.h !== 0) {
+        const x1 = x0 + this.tools.h, y1 = f(x1);
+        if (Number.isFinite(y1)) {
+          const m = (y1 - y0) / (x1 - x0);
+          stroke(m, x0, y0, [], 1.8);
+          const X = this.X(x1), Y = this.Y(y1);
+          ctx.save(); ctx.beginPath(); ctx.arc(X, Y, 5.5, 0, TAU); ctx.fillStyle = this.theme.bg; ctx.fill(); ctx.lineWidth = 2.5; ctx.strokeStyle = sel.color; ctx.stroke(); ctx.restore();
+          info.secant = { m, b: y0 - m * x0, x0, y0, x1, y1 };
+        }
+      }
+      return info;
     }
 
     /* ---------- hit testing ---------- */
