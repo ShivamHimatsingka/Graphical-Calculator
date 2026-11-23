@@ -1,465 +1,199 @@
 # 📈 Graphical Calculator
 
-> A fast, interactive, Desmos-inspired graphing calculator built with Python.
-
-A desktop graphing calculator designed for fast mathematical exploration, with interactive expressions, variables, sliders, points, curve tracking, and customizable graphs.
-
----
-
-## ✨ Features
-
-* 📏 Straight-line equations
-* 📐 Quadratic equations
-* 🔢 Polynomial functions
-* 📊 Trigonometric functions
-* 🔣 Logarithms
-* √ Square roots
-* ⚡ Exponential functions
-* ➕ Multiple expressions
-* 🎚️ Interactive variable sliders
-* 🔄 Two-way slider/variable synchronization
-* 🎨 Custom equation colours
-* 📍 User-defined points
-* 🖱️ Curve tracking
-* 🔍 Zoom and pan
-* 👁️ Show/hide expressions
-* 🗑️ Delete expressions
-* ⚡ Debounced live updates
-* 🚀 Performance optimizations
-
----
-
-## 🌐 Web version (Desmos-style, no install)
-
-A zero-dependency browser version lives in [`docs/`](docs/). Open `docs/index.html` directly, or serve it:
-
-```bash
-cd docs && python3 -m http.server 8000   # then visit http://localhost:8000
-```
-
-To host it free on **GitHub Pages**: *Settings → Pages → Deploy from branch → `main` / `/docs`*.
-
-**Web features:** functions `y=f(x)`, `x=f(y)`, polar `r=f(θ)`, parametric `(x(t), y(t))`, implicit curves (`x^2+y^2=25`), inequalities & shading (`y<x^2`, `1<x<3`), points (draggable), tables, lists (`[1...10]`, `L^2`, `L[L>5]`, `(L, L^2)`), statistics (`mean`, `median`, `stdev`, `quartile`, `corr`, `sort`, `join`…), regressions (`y_1 ~ m x_1 + b`, any model), folders & drag-to-reorder rows, `random`/`shuffle`, distributions (`normpdf`, `normcdf`, `invnorm`, `binompdf`, `poissoncdf`…), regression residuals (`e_1`), one curve per list item (`y=L sin(x)`), user functions `f(x)=…` with derivatives `f'(x)`, `sum` / `prod` / `int`, piecewise `{x<0: -x, x}` and domain restrictions `{0<=t<=2π}`, auto-created sliders with play/animate, zeros / extrema / intersection points when you click a curve, trace, zoom / pan / pinch / axis-drag scaling, radians/degrees, π axis labels, light/dark theme, undo/redo, on-screen keypad, save/open JSON, PNG export, share links and autosave.
-
----
-
-## 🖥️ Preview
+> A Desmos-style graphing calculator — runs **in your browser** with zero installs, plus a native Python desktop edition.
 
 <p align="center">
-  <img src="screenshot/screenshot.png" width="850">
+  <a href="https://shivamhimatsingka.github.io/Graphical-Calculator/"><b>▶ Open the live web app</b></a>
 </p>
+
+<p align="center">
+  <img src="assets/web-screenshot.jpg" width="900" alt="Web graphing calculator showing a slider-driven sine wave, a polar rose, a shaded inequality, a table with regression line">
+</p>
+
+This repository contains two editions:
+
+| Edition | Where | Stack | Best for |
+| --- | --- | --- | --- |
+| 🌐 **Web** (recommended) | [`docs/`](docs/) · [live site](https://shivamhimatsingka.github.io/Graphical-Calculator/) | Plain HTML / CSS / JavaScript, no dependencies | Everything — full Desmos-style feature set, works on desktop, tablet and phone |
+| 🖥️ **Desktop** | [`desktop/`](desktop/) | Python, PySide6, PyQtGraph, NumPy, SymPy | The original native app (functions, sliders, points, tracing) |
 
 ---
 
-## 🚀 Installation
+## ✨ Web features
 
-### Requirements
+**Graph anything**
 
-* Python 3.10+
-* macOS, Windows, or Linux
+* Functions `y = f(x)` and `x = f(y)`
+* Polar `r = f(θ)` and parametric `(x(t), y(t))`
+* Implicit curves, e.g. `x^2 + y^2 = 25`
+* Inequalities with shading, including chains: `y < x^2`, `1 < x < 3`
+* Points (drag them!), point lists, tables
+* Piecewise functions `{x<0: -x, x^2}` and domain restrictions `y = x^2 {x > 0}`
 
-Check your Python version:
+**Math engine**
 
-```bash
-python --version
+* Your own functions `f(x) = …`, derivatives `f'(x)`, numeric `int`, `sum`, `prod`, `nderiv`
+* Implicit multiplication (`2x`, `a(x+1)`, `sin 2x`, `sin^2(x)`), `|abs|`, `n!`, `30°`, `log_2(x)`
+* Radians / degrees mode
+
+**Sliders**
+
+* Use any new letter and click **add slider** — adjustable range, step, speed, **play/animate**
+* Two-way sync between the text (`a=2.5`) and the slider
+
+**Lists & statistics**
+
+* Lists `[1,2,3]`, ranges `[1...10]` / `[2,4...20]`, indexing `L[3]`, slicing `L[2...4]`, filtering `L[L>5]`
+* Everything broadcasts: `L^2`, `sin(L)`, `f(L)`, `(L, L^2)`, and `y = L sin(x)` draws one curve per item
+* `total mean median min max count stdev stdevp variance varp mad quartile corr cov sort unique join shuffle random`
+* Distributions: `normpdf normcdf invnorm binompdf binomcdf poissonpdf poissoncdf exppdf expcdf unifpdf unifcdf`
+
+**Tables & regression**
+
+* Tables expose lists `x_1`, `y_1`, … 
+* Least-squares regression with **any model**: `y_1 ~ m x_1 + b`, `y_1 ~ a x_1^2 + b x_1 + c`, `y_1 ~ a*e^(b x_1)` — shows parameters, r² and residuals `e_1`
+
+**Exploring the graph**
+
+* Click a curve to see **zeros, extrema, y-intercept and intersections**; drag along it to trace
+* Zoom (wheel / pinch), pan, scale a single axis by dragging along it, window settings, π-labelled axis
+* Light / dark theme
+
+**Workspace**
+
+* Folders, drag-to-reorder rows, notes, colours, line styles and thickness, show/hide
+* Undo / redo, on-screen keypad, autosave
+* Save / open `.json`, export PNG, copy a share link, built-in examples
+
+### Quick syntax reference
+
+```text
+y = a*sin(b*x + c)            sliders appear for a, b, c
+r = 3cos(4θ) {0 <= θ <= 2π}   polar with a domain
+(sin(3t), sin(2t)) {0<=t<=2π} parametric
+x^2 + y^2 = 25                implicit
+y < x^2 - 3                   inequality
+f(x) = x^3 - 3x               define a function, then use f(2) or f'(x)
+L = [1...10]                  list;  mean(L), L[L>5], (L, L^2)
+y_1 ~ m x_1 + b               regression on table 1
+int(0, 1, x^2)                integral;  sum(n,1,10,n^2) is a sum
 ```
 
-### Clone the repository
+### Run it locally
+
+The web app is static files — no build step.
+
+```bash
+python3 -m http.server 8000 --directory docs
+# open http://localhost:8000
+```
+
+…or simply open `docs/index.html` in a browser. To self-host, publish the `docs/` folder anywhere (GitHub Pages: *Settings → Pages → `main` / `/docs`*).
+
+### Run the tests
+
+```bash
+node tests/engine.test.js     # math-engine regression tests (needs Node 16+)
+```
+
+---
+
+## 🖥️ Desktop edition (Python)
+
+<p align="center">
+  <img src="assets/desktop-screenshot.png" width="760" alt="Desktop edition screenshot">
+</p>
+
+Requires Python 3.10+ on macOS, Windows or Linux.
 
 ```bash
 git clone https://github.com/ShivamHimatsingka/Graphical-Calculator.git
 cd Graphical-Calculator
+pip install -r desktop/requirements.txt
+python desktop/main.py
 ```
 
-### Install dependencies
+Supports lines, polynomials, trigonometry, logarithms, exponentials, interactive sliders with two-way sync, custom colours, user-defined points, curve tracking, zoom/pan, show/hide/delete, and debounced live updates.
 
-```bash
-pip install PySide6 pyqtgraph numpy sympy
-```
-
-### Run
-
-```bash
-python main.py
-```
-
-If your system uses `python3`:
-
-```bash
-python3 main.py
-```
+> The desktop edition has a smaller feature set than the web edition; new features land in the web app first.
 
 ---
 
-## 📐 Supported Expressions
-
-### Straight Lines
-
-```text
-y = 2x + 3
-y = -x + 5
-```
-
-### Quadratics
-
-```text
-y = x^2
-y = x^2 + 2x + 1
-y = -2x^2 + 4x - 3
-```
-
-### Polynomials
-
-```text
-y = x^3 - 2x^2 + x
-y = 2x^4 - x^2 + 3
-```
-
-### Trigonometry
-
-```text
-y = sin(x)
-y = cos(x)
-y = tan(x)
-```
-
-Inverse trigonometric functions:
-
-```text
-y = asin(x)
-y = acos(x)
-y = atan(x)
-```
-
-### Logarithms
-
-```text
-y = log(x)
-y = ln(x)
-```
-
-### Other Functions
-
-```text
-y = sqrt(x)
-y = exp(x)
-```
-
-Constants such as `pi` and `e` are also supported.
-
----
-
-## 🎚️ Interactive Sliders
-
-Variables can be defined directly in the expression list.
-
-```text
-a = 1
-```
-
-The calculator creates an interactive slider for the variable.
-
-You can then use it in an equation:
-
-```text
-y = ax^2
-```
-
-Moving the slider changes `a` and automatically updates the graph.
-
-### Two-way synchronization
-
-The slider and variable value stay synchronized.
-
-Moving the slider:
-
-```text
-a = 1
-↓
-a = 3.5
-```
-
-Or editing the variable manually:
-
-```text
-a = 7
-```
-
-will also update the slider.
-
----
-
-## 📍 Points
-
-Define points using:
-
-```text
-A = (2, 3)
-```
-
-or:
-
-```text
-B = (-4, 5)
-```
-
-Points are displayed directly on the graph.
-
-Variables can also be used:
-
-```text
-a = 2
-A = (a, a^2)
-```
-
-Changing `a` automatically moves the point.
-
----
-
-## 🖱️ Curve Tracking
-
-Move the cursor over a plotted curve to inspect the corresponding coordinates.
-
-The calculator finds the nearest point on the curve and displays its position.
-
-Example:
-
-```text
-(2.15, 4.62)
-```
-
----
-
-## 🎨 Equation Colours
-
-Each expression can have its own colour.
-
-This makes it easier to distinguish multiple equations on the same graph.
-
-For example:
-
-```text
-y = x^2
-y = 2x + 1
-y = sin(x)
-```
-
-can each be displayed using different colours.
-
----
-
-## 🔍 Graph Controls
-
-### Zoom
-
-Use the mouse wheel over the graph.
-
-### Pan
-
-Click and drag the graph.
-
-### Reset
-
-Reset the graph view to the default coordinate range.
-
----
-
-## ⚡ Performance
-
-The calculator is designed to remain responsive during interactive use.
-
-### Debounced Updates
-
-Expressions are not recalculated unnecessarily on every keystroke.
-
-### NumPy
-
-Used for fast numerical calculations and evaluating graph points.
-
-### PyQtGraph
-
-Provides fast interactive graph rendering.
-
-### SymPy
-
-Handles mathematical expression parsing and conversion.
-
-### Optimized Updates
-
-Graph elements are updated only when necessary, helping keep expression editing and sliders responsive.
-
----
-
-## 🧩 Built With
-
-| Technology   | Purpose               |
-| ------------ | --------------------- |
-| 🐍 Python    | Core application      |
-| 🎨 PySide6   | User interface        |
-| 📈 PyQtGraph | Graph rendering       |
-| 🔢 NumPy     | Numerical computation |
-| 🧮 SymPy     | Mathematical parsing  |
-
-Install all dependencies with:
-
-```bash
-pip install PySide6 pyqtgraph numpy sympy
-```
-
----
-
-## 📁 Project Structure
+## 📁 Project structure
 
 ```text
 Graphical-Calculator/
-│
-├── main.py
-├── README.md
+├── docs/                    # 🌐 Web app (served by GitHub Pages)
+│   ├── index.html
+│   ├── css/style.css
+│   └── js/
+│       ├── mathengine.js    #   tokenizer, parser, list/stat runtime, code generator
+│       ├── graph.js         #   canvas renderer & interaction (marching squares, POIs, tracing)
+│       └── app.js           #   UI, evaluation pipeline, sliders, tables, folders, regression
+├── desktop/                 # 🖥️ Python/PySide6 edition
+│   ├── main.py
+│   └── requirements.txt
+├── tests/engine.test.js     # math-engine tests
+├── assets/                  # README images
+├── package.json             # `npm start` / `npm test` helpers
 ├── LICENSE
-├── .gitignore
-│
-└── screenshots/
-    └── preview.png
+└── README.md
 ```
+
+### How the web app works
+
+1. **Parse** — `mathengine.js` tokenizes and parses each row into an AST (implicit multiplication, lists, ranges, indexing, piecewise, restrictions).
+2. **Classify** — `app.js` decides what each row is: slider, function definition, curve, point, inequality, regression…
+3. **Compile** — the AST is compiled to a fast JavaScript closure; list-aware code is generated only where lists are involved.
+4. **Render** — `graph.js` samples curves adaptively (discontinuity-aware), runs marching squares for implicit curves and inequalities, and draws on a HiDPI canvas.
 
 ---
 
-## 🛠️ Roadmap
+## 🗺️ Status & roadmap
 
-Future improvements may include:
-
-* [ ] Derivatives
-* [ ] Integrals
-* [ ] Tangent lines
-* [ ] Secant lines
-* [ ] Intersections
-* [ ] Roots / zeros
-* [ ] Inequalities
-* [ ] Filled regions
-* [ ] Parametric equations
-* [ ] Polar equations
-* [ ] Regression
-* [ ] Statistics
-* [ ] Animated sliders
-* [ ] Adjustable slider ranges
-* [ ] Undo / redo
-* [ ] Save and load graphs
-* [ ] Export graphs as images
-* [ ] Keyboard shortcuts
-* [ ] Dark mode
-* [ ] Improved Desmos-style interface
-* [ ] LaTeX equation rendering
-* [ ] GPU-accelerated rendering
+- [x] Derivatives, integrals, sums, products
+- [x] Roots, extrema, intersections
+- [x] Inequalities and filled regions
+- [x] Parametric and polar equations
+- [x] Lists, statistics and regression
+- [x] Animated sliders with adjustable ranges
+- [x] Undo / redo, save & load, image export, share links
+- [x] Dark mode
+- [ ] Live formula editor (currently plain-text input with formatted display)
+- [ ] Complex numbers
+- [ ] Actions / ticker
+- [ ] 3D graphs
+- [ ] Tangent / secant lines
+- [ ] Histograms, box plots and more statistics plots
 
 ---
 
 ## 🐛 Troubleshooting
 
-### `ModuleNotFoundError`
-
-If you see:
-
-```text
-ModuleNotFoundError: No module named 'PySide6'
-```
-
-install the dependencies:
-
-```bash
-pip install PySide6 pyqtgraph numpy sympy
-```
-
-Or:
-
-```bash
-python3 -m pip install PySide6 pyqtgraph numpy sympy
-```
-
-Then run:
-
-```bash
-python main.py
-```
-
-### Check Python Version
-
-```bash
-python --version
-```
-
-Python 3.10 or newer is recommended.
+* **Web app shows an old version after an update** — hard-refresh (⇧⌘R / Ctrl+F5); browsers cache the JavaScript.
+* **Row shows a red message** — hover/read it: it names the problem (unknown character, unmatched parenthesis, …).
+* **`ModuleNotFoundError: No module named 'PySide6'`** (desktop) — `pip install -r desktop/requirements.txt`.
 
 ---
 
 ## 🤝 Contributing
 
-Contributions, suggestions, and bug reports are welcome.
+Issues and pull requests are welcome.
 
-### Fork the repository
+1. Fork the repo and create a branch.
+2. For the web app, edit files in `docs/` and run `node tests/engine.test.js`.
+3. Open a pull request describing the change.
 
-```bash
-git clone https://github.com/ShivamHimatsingka/Graphical-Calculator.git
-cd Graphical-Calculator
-```
-
-### Create a branch
-
-```bash
-git checkout -b feature/my-feature
-```
-
-### Make your changes
-
-### Commit
-
-```bash
-git commit -m "Add new feature"
-```
-
-### Push
-
-```bash
-git push origin feature/my-feature
-```
-
-Then open a Pull Request.
-
----
-
-## 🐞 Reporting Bugs
-
-When opening an issue, please include:
-
-* Operating system
-* Python version
-* Error message
-* Steps to reproduce
-* Screenshot, if applicable
+When reporting a bug please include your OS/browser (or Python version), the exact expression, what you expected and what happened — a screenshot helps.
 
 ---
 
 ## 📄 License
 
-This project is licensed under the MIT License.
-
-See [`LICENSE`](LICENSE) for details.
-
----
+MIT — see [`LICENSE`](LICENSE).
 
 ## 👨‍💻 Author
 
 **Shivam Himatsingka**
 
-Built with Python, mathematics, and a lot of experimentation.
-
----
-
-<p align="center">
-
-⭐ **If you like this project, consider giving it a star!**
-
-<br>
-
-**Python • PySide6 • PyQtGraph • NumPy • SymPy**
-
-</p>
+<p align="center">⭐ If you like this project, consider giving it a star!</p>
