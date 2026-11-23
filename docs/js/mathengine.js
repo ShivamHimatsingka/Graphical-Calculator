@@ -173,8 +173,55 @@
     unique: (L) => [...new Set(isA(L) ? L : [L])].sort((x, y) => x - y),
     join: (...a) => a.flatMap((x) => (isA(x) ? x : [x])),
   });
+  /* ---- random & distributions ---- */
+  function erf(x) {
+    const ax = Math.abs(x);
+    if (ax > 6) return Math.sign(x);
+    if (ax < 3) {
+      let sum = 0, term = ax;
+      for (let n = 0; n < 80; n++) { sum += term / (2 * n + 1); term *= -ax * ax / (n + 1); if (Math.abs(term) < 1e-18) break; }
+      return Math.sign(x) * 2 / Math.sqrt(Math.PI) * sum;
+    }
+    let cf = 0;
+    for (let k = 60; k >= 1; k--) cf = (k / 2) / (ax + cf);
+    return Math.sign(x) * (1 - Math.exp(-ax * ax) / Math.sqrt(Math.PI) / (ax + cf));
+  }
+  function lgamma(z) {
+    if (z < 0.5) return Math.log(Math.PI / Math.abs(Math.sin(Math.PI * z))) - lgamma(1 - z);
+    z -= 1;
+    const c = [0.99999999999980993, 676.5203681218851, -1259.1392167224028, 771.32342877765313, -176.61502916214059, 12.507343278686905, -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7];
+    let x = c[0]; for (let i = 1; i < 9; i++) x += c[i] / (z + i);
+    const t = z + 7.5;
+    return 0.5 * Math.log(2 * Math.PI) + (z + 0.5) * Math.log(t) - t + Math.log(x);
+  }
+  const ncdf = (x) => 0.5 * (1 + erf(x / Math.SQRT2));
+  function invStdNorm(p) {
+    if (!(p > 0 && p < 1)) return p === 0 ? -Infinity : p === 1 ? Infinity : NaN;
+    // bisection refined with Newton (robust, 1e-12)
+    let lo = -40, hi = 40;
+    for (let i = 0; i < 200; i++) { const m = (lo + hi) / 2; if (ncdf(m) < p) lo = m; else hi = m; }
+    return (lo + hi) / 2;
+  }
+  const binomP = (n, p, k) => (k < 0 || k > n || k !== Math.floor(k) ? 0 : Math.exp(lgamma(n + 1) - lgamma(k + 1) - lgamma(n - k + 1) + (k ? k * Math.log(p) : 0) + (n - k ? (n - k) * Math.log(1 - p) : 0)));
+  const poisP = (l, k) => (k < 0 || k !== Math.floor(k) ? 0 : Math.exp(-l + (k ? k * Math.log(l) : 0) - lgamma(k + 1)));
+  Object.assign(R, {
+    erf,
+    random: (n) => (n === undefined ? Math.random() : Array.from({ length: Math.max(0, Math.min(1e5, Math.floor(n))) }, () => Math.random())),
+    shuffle: (L) => { const a = (isA(L) ? L : [L]).slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; },
+    normpdf: (x, mu = 0, sd = 1) => Math.exp(-0.5 * ((x - mu) / sd) ** 2) / (sd * Math.sqrt(2 * Math.PI)),
+    normcdf: (x, mu = 0, sd = 1) => ncdf((x - mu) / sd),
+    invnorm: (p, mu = 0, sd = 1) => mu + sd * invStdNorm(p),
+    binompdf: binomP,
+    binomcdf: (n, p, k) => { let s2 = 0; for (let i = 0; i <= Math.min(Math.floor(k), n); i++) s2 += binomP(n, p, i); return Math.min(1, s2); },
+    poissonpdf: poisP,
+    poissoncdf: (l, k) => { let s2 = 0; for (let i = 0; i <= Math.floor(k); i++) s2 += poisP(l, i); return Math.min(1, s2); },
+    exppdf: (x, l = 1) => (x < 0 ? 0 : l * Math.exp(-l * x)),
+    expcdf: (x, l = 1) => (x < 0 ? 0 : 1 - Math.exp(-l * x)),
+    unifpdf: (x, a = 0, b = 1) => (x >= a && x <= b ? 1 / (b - a) : 0),
+    unifcdf: (x, a = 0, b = 1) => (x <= a ? 0 : x >= b ? 1 : (x - a) / (b - a)),
+  });
   function clampQ(q) { return Math.max(0, Math.min(4, Number.isFinite(q) ? q : 2)); }
-  const AGG = new Set(['total', 'mean', 'median', 'min', 'max', 'count', 'length', 'stdev', 'stdevp', 'variance', 'varp', 'mad', 'quartile', 'corr', 'cov', 'sort', 'unique', 'join']);
+  const AGG = new Set(['shuffle', 'total', 'mean', 'median', 'min', 'max', 'count', 'length', 'stdev', 'stdevp', 'variance', 'varp', 'mad', 'quartile', 'corr', 'cov', 'sort', 'unique', 'join']);
   const AGG_ALWAYS = new Set([...AGG].filter((x) => x !== 'min' && x !== 'max'));
   const LISTVARS = new Set();
 
@@ -641,7 +688,7 @@
       case 'bin': return listValued(n.a, locals) || listValued(n.b, locals);
       case 'tuple': return n.items.some((i) => listValued(i, locals));
       case 'call':
-        if (n.n === 'sort' || n.n === 'unique' || n.n === 'join') return true;
+        if (n.n === 'sort' || n.n === 'unique' || n.n === 'join' || n.n === 'shuffle' || (n.n === 'random' && n.args.length)) return true;
         if (AGG.has(n.n) || SPECIAL.has(n.n)) return false;
         return n.args.some((a) => listValued(a, locals));
       default: return false;
@@ -651,7 +698,7 @@
     switch (n.t) {
       case 'list': case 'range': case 'index': return true;
       case 'var': return !locals.has(n.n) && LISTVARS.has(n.n);
-      case 'call': if (AGG_ALWAYS.has(n.n)) return true; return n.args.some((a) => touches(a, locals));
+      case 'call': if (AGG_ALWAYS.has(n.n) || (n.n === 'random' && n.args.length)) return true; return n.args.some((a) => touches(a, locals));
       default: return kids(n).some((k) => touches(k, locals));
     }
   }

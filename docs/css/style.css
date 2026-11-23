@@ -152,3 +152,18 @@ code { background: var(--gutter); padding: 0 4px; border-radius: 3px; }
   #keypad .grid { grid-template-columns: repeat(8, 1fr); }
   #app.collapsed #stage { height: 100%; }
 }
+
+/* folders & drag-reorder */
+.row.in-folder .gutter { box-shadow: inset 4px 0 0 var(--line); }
+.row.in-folder { background: color-mix(in srgb, var(--gutter) 35%, transparent); }
+.row.folded { display: none; }
+.row.is-folder { background: var(--gutter); min-height: 44px; }
+.row.is-folder .gutter { background: transparent; }
+.ftitle { display: flex; align-items: center; gap: 6px; padding-top: 4px; }
+.ftitle .fold { border: 0; background: transparent; font-size: 14px; width: 24px; height: 24px; color: var(--muted); }
+.ftitle .ftext { font: 600 15px -apple-system, "Segoe UI", Roboto, sans-serif; }
+.gutter { cursor: grab; }
+.gutter .dot { cursor: pointer; }
+.row.dragging { opacity: .4; }
+.row.drop-before { box-shadow: inset 0 3px 0 var(--accent); }
+.row.drop-after { box-shadow: inset 0 -3px 0 var(--accent); }

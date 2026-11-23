@@ -200,6 +200,11 @@
     } catch (e) { return null; }
   }
 
+  function isHidden(item) {
+    if (item.hidden) return true;
+    if (item.parent) { const par = state.items.find((i) => i.id === item.parent); if (par && par.hidden) return true; }
+    return false;
+  }
   function plotColor(c) { return state.settings.theme === 'dark' && c.toLowerCase() === '#000000' ? '#f2f2f2' : c; }
 
   function evaluate() {
@@ -270,7 +275,7 @@
     // lists: table columns, then list-valued variable definitions (fixpoint)
     ME.LISTVARS.clear();
     const tableRecs = list.filter((r) => r.item.type === 'table');
-    for (const tr of tableRecs) { const n = tr.item.tno; ['x', 'y'].forEach((c) => { ME.LISTVARS.add(`${c}_${n}`); V[`${c}_${n}`] = []; }); }
+    for (const tr of tableRecs) { const n = tr.item.tno; ['x', 'y'].forEach((c) => { ME.LISTVARS.add(`${c}_${n}`); V[`${c}_${n}`] = []; }); ME.LISTVARS.add(`e_${n}`); V[`e_${n}`] = []; }
     for (let guard = 0, changed = true; changed && guard < 12; guard++) {
       changed = false;
       for (const name of Object.keys(varDefs)) {
@@ -320,7 +325,7 @@
     const cache = new Map();
     const num = (s) => { if (!cache.has(s)) cache.set(s, evalNumberText(s)); return cache.get(s); };
     return {
-      id: item.id, kind: 'table', color: plotColor(item.color), width: item.width, lineStyle: item.line, hidden: item.hidden,
+      id: item.id, kind: 'table', color: plotColor(item.color), width: item.width, lineStyle: item.line, hidden: isHidden(item),
       showLine: item.showLine, size: 3 + item.width * 1.2,
       get points() {
         const pts = [];
@@ -334,7 +339,7 @@
     const item = rec.item, P = rec.parts, st = rec.stmt, ops = st.ops;
     const fvOf = (n) => ME.freeVars(n);
     const isVar = (n, name) => n.t === 'var' && n.n === name;
-    const base = () => ({ id: item.id, color: plotColor(item.color), width: item.width, lineStyle: item.line, hidden: item.hidden });
+    const base = () => ({ id: item.id, color: plotColor(item.color), width: item.width, lineStyle: item.line, hidden: isHidden(item) });
     const needMissing = (nodes, params) => {
       const s = new Set();
       nodes.forEach((n) => ME.freeVars(n).forEach((v) => s.add(v)));
@@ -353,6 +358,15 @@
       return (...a) => { for (const c of cs) if (!c(...a)) return false; return true; };
     };
     const allNodes = () => P.concat(rec.restrict);
+    const pushFx = (expr, cond, range) => {
+      if (ME.listValued(expr)) {
+        const f = ME.compile(expr, ['x']); let n = 0;
+        for (const x0 of [1, 0.5, 2, 0.25]) { const v = f(x0); if (Array.isArray(v)) { n = v.length; break; } }
+        for (let i = 0; i < Math.min(n, 60); i++) plots.push(Object.assign(base(), { kind: 'fx', f: (x) => { const v = f(x); return Array.isArray(v) ? v[i] : NaN; }, cond, range }));
+        return;
+      }
+      plots.push(Object.assign(base(), { kind: 'fx', f: ME.compile(expr, ['x']), cond, range }));
+    };
 
     // function definition
     if (rec.def && rec.def.type === 'fn') {
@@ -405,7 +419,7 @@
       const fvs = fvOf(e);
       if (fvs.has('x') && !fvs.has('y')) {
         rec.kind = 'fx'; needMissing(allNodes(), ['x', 'y']);
-        plots.push(Object.assign(base(), { kind: 'fx', f: ME.compile(e, ['x']), cond: mkCond(['x', 'y']), range: extractRange(rec.restrict, 'x') }));
+        pushFx(e, mkCond(['x', 'y']), extractRange(rec.restrict, 'x'));
         return;
       }
       if (fvs.has('x') && fvs.has('y')) throw new ME.MathError('Use an equation or inequality with both x and y');
@@ -431,6 +445,8 @@
       const sol = levMar(res, params.map(() => 1));
       const r = res(sol);
       params.forEach((n, i) => { V[n] = sol[i]; defined.add(n); });
+      const ym = Lh.t === 'var' && /^y_(\d+)$/.exec(Lh.n);
+      if (ym) V[`e_${ym[1]}`] = r;
       const sse = r.reduce((a, v) => a + v * v, 0), yb = Y.reduce((a, v) => a + v, 0) / Y.length, sst = Y.reduce((a, v) => a + (v - yb) * (v - yb), 0);
       const r2 = sst > 0 ? 1 - sse / sst : NaN;
       rec.kind = 'regression';
@@ -452,7 +468,7 @@
       else if (isVar(L, 'r') && noVar(Rr, 'r') && !fvOf(Rr).has('x') && !fvOf(Rr).has('y')) { kind = 'polar'; expr = Rr; }
       if (kind === 'fx') {
         rec.kind = 'fx'; needMissing([expr].concat(rec.restrict), ['x', 'y']);
-        plots.push(Object.assign(base(), { kind: 'fx', f: ME.compile(expr, ['x']), cond: mkCond(['x', 'y']), range: extractRange(rec.restrict, 'x') }));
+        pushFx(expr, mkCond(['x', 'y']), extractRange(rec.restrict, 'x'));
       } else if (kind === 'fy') {
         rec.kind = 'fy'; needMissing([expr].concat(rec.restrict), ['x', 'y']);
         plots.push(Object.assign(base(), { kind: 'fy', f: ME.compile(expr, ['y']), cond: mkCond(['x', 'y']), range: extractRange(rec.restrict, 'y') }));
@@ -510,6 +526,18 @@
       const r = rows.get(item.id); if (!r) continue;
       n++; r.num.textContent = n;
     }
+    applyFolderState();
+  }
+  function applyFolderState() {
+    const byId = new Map(state.items.map((i) => [i.id, i]));
+    for (const item of state.items) {
+      if (item.parent && !(byId.get(item.parent) && byId.get(item.parent).type === 'folder')) delete item.parent;
+      const r = rows.get(item.id); if (!r) continue;
+      const par = item.parent && byId.get(item.parent);
+      r.el.classList.toggle('in-folder', !!par);
+      r.el.classList.toggle('folded', !!(par && par.collapsed));
+      if (item.type === 'folder') { r.el.classList.toggle('collapsed', !!item.collapsed); if (r.fold) r.fold.textContent = item.collapsed ? '▸' : '▾'; }
+    }
   }
 
   function updateRowUI(rec) {
@@ -518,13 +546,16 @@
     if (item.type === 'expr') {
       const isPlot = !!(graph.plots.find((p) => p.id === item.id));
       row.dot.classList.toggle('none', !isPlot);
-      row.dot.classList.toggle('off', !!item.hidden && isPlot);
+      row.dot.classList.toggle('off', isHidden(item) && isPlot);
       row.dot.style.setProperty('--c', item.color);
       row.dot.disabled = !isPlot;
       row.el.classList.toggle('is-slider', !!rec.isSlider);
       if (rec.isSlider) syncSliderUI(rec);
     } else if (item.type === 'table') {
       row.dot.style.setProperty('--c', item.color);
+      row.dot.classList.toggle('off', isHidden(item));
+    } else if (item.type === 'folder') {
+      row.dot.style.setProperty('--c', '#7a7a7a');
       row.dot.classList.toggle('off', !!item.hidden);
     }
     let html = '';
@@ -594,7 +625,16 @@
       row.inp = row.ta;
     } else if (item.type === 'table') {
       buildTable(item, row, main);
+    } else if (item.type === 'folder') {
+      e.classList.add('is-folder');
+      main.innerHTML = '<div class="ftitle"><button class="fold" aria-label="Collapse or expand folder">▾</button><input class="in ftext" type="text" spellcheck="false" placeholder="Folder name"></div>';
+      row.fold = $('.fold', main); row.inp = $('.ftext', main); row.msg = el('div');
+      row.inp.value = item.text;
+      row.inp.addEventListener('input', () => { item.text = row.inp.value; commitSoon(); saveSoon(); });
+      row.inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); addItem('expr', item.id); } });
+      row.fold.addEventListener('click', () => { item.collapsed = !item.collapsed; applyFolderState(); saveSoon(); commitSoon(); });
     }
+    $('.gutter', e).draggable = true;
     row.dot.addEventListener('click', () => { item.hidden = !item.hidden; evaluate(); commitSoon(); saveSoon(); });
     $('.gear', e).addEventListener('click', (ev) => openItemPopover(item, ev.currentTarget));
     $('.del', e).addEventListener('click', () => deleteItem(item.id));
@@ -718,7 +758,15 @@
   function addItem(type, afterId, text) {
     const item = newItem(type, text !== undefined ? { text } : {});
     let idx = state.items.length;
-    if (afterId) { const i = state.items.findIndex((x) => x.id === afterId); if (i >= 0) idx = i + 1; }
+    if (afterId) {
+      const i = state.items.findIndex((x) => x.id === afterId);
+      if (i >= 0) {
+        idx = i + 1;
+        const a = state.items[i];
+        const par = a.type === 'folder' ? a.id : a.parent;
+        if (par && type !== 'folder') item.parent = par;
+      }
+    }
     state.items.splice(idx, 0, item);
     const rowEl = createRow(item);
     const list = $('#list');
@@ -736,6 +784,7 @@
   }
   function deleteItem(id) {
     const i = state.items.findIndex((x) => x.id === id); if (i < 0) return;
+    if (state.items[i].type === 'folder') state.items.forEach((c) => { if (c.parent === id) delete c.parent; });
     state.items.splice(i, 1); playing.delete(id);
     const r = rows.get(id); if (r) { r.el.remove(); rows.delete(id); }
     if (graph.selectedId === id) graph.setSelected(null);
@@ -832,7 +881,7 @@
     pop.dataset.id = item.id;
     const rec = recs.get(item.id);
     const isSlider = rec && rec.isSlider;
-    const showStyle = item.type !== 'note';
+    const showStyle = item.type === 'expr' || item.type === 'table';
     let html = '';
     if (showStyle) {
       html += `<div class="sec"><h4>Color</h4><div class="sw">${PALETTE.map((c) => `<button data-c="${c}" style="background:${c}" class="${c === item.color ? 'on' : ''}" aria-label="${c}"></button>`).join('')}<input type="color" value="${/^#[0-9a-f]{6}$/i.test(item.color) ? item.color : '#2d70b3'}" aria-label="Custom color"></div></div>
@@ -911,6 +960,10 @@
     ['Implicit curves', ['x^2+y^2=25', 'x^3+y^3=3 x y', 'y^2=x^3-3x+3']],
     ['Calculus: f, f\' and area', ['f(x)=x^3-3x', 'y=f\'(x)', 'y=f(x){-2<=x<=1}', 'int(0,2,f(x))']],
     ['Piecewise & restrictions', ['y={x<0:-x, x^2}', 'y=2{1<=x<=4}', 'x=-3{-2<=y<=2}']],
+    ['Folders', [{ type: 'folder', text: 'Circle' }, 'x^2+y^2=4', '(0,0)', { type: 'folder', text: 'Parabola' }, 'y=x^2-2', 'y=-x^2+2']],
+    ['Random & distributions', ['y=normpdf(x)', 'y=normpdf(x,1.5,0.6)', 'normcdf(1.96)', 'binompdf(10,0.5,5)', 'invnorm(0.975)', 'R=random(6)', 'shuffle([1...6])']],
+    ['Many curves from a list', ['L=[1...5]', 'y=L sin(x)/2']],
+    ['Residuals', [{ type: 'table', rows: [['1', '2.1'], ['2', '3.9'], ['3', '6.2'], ['4', '7.8'], ['5', '10.1'], ['', '']] }, 'y_1 ~ m x_1 + b', '(x_1, e_1)']],
     ['Draggable points', ['(1,2)', '(3,-1)', 'y=m x+c', 'm=0.5', 'c=1']],
     ['Lists & statistics', ['L=[1...10]', 'M=L^2', '(L,M)', 'mean(M)', 'median(M)', 'stdev(M)', 'sort([5,3,9,1])', 'L[L>6]', 'total(L)']],
     ['Regression from a table', [{ type: 'table', rows: [['1', '2.1'], ['2', '3.9'], ['3', '6.2'], ['4', '7.8'], ['5', '10.1'], ['6', '12.2'], ['', '']] }, 'y_1 ~ m x_1 + b']],
@@ -918,7 +971,12 @@
   ];
   function loadExample(texts) {
     state.tableCount = 0;
-    state.items = texts.map((t) => (typeof t === 'string' ? newItem('expr', { text: t }) : newItem(t.type, JSON.parse(JSON.stringify(t)))));
+    let cur = null;
+    state.items = texts.map((t) => {
+      const it = typeof t === 'string' ? newItem('expr', { text: t }) : newItem(t.type, JSON.parse(JSON.stringify(t)));
+      if (it.type === 'folder') cur = it; else if (cur) it.parent = cur.id;
+      return it;
+    });
     state.items.push(newItem('expr'));
     playing.clear(); graph.setSelected(null); renderList(); evaluate(); graph.resetView(); commitSoon(); saveSoon();
   }
@@ -954,7 +1012,7 @@
   function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 1800); }
 
   function showHelp() {
-    const it = newItem('note', { text: 'Syntax cheat-sheet\n• y = x^2, x = y^2, r = 2 sin(3θ)\n• Implicit: x^2 + y^2 = 4   Inequality: y < sin(x), 1 < x < 3\n• Parametric: (cos(t), sin(t)){0<=t<=2π}\n• Points: (1, 2) — drag them!\n• Functions: f(x) = x^2, then f(3) or f\'(x)\n• Sliders: type a new letter (a x) and click “add slider”\n• Restrict a domain: y = x^2 {x > 0}   Piecewise: y = {x<0: -x, x}\n• Lists: L=[1...10], [2,4...20], L^2, L[3], L[L>5], (L, L^2)\n• Stats: mean, median, total, stdev, variance, quartile, corr, cov, sort, join, unique, count\n• Tables make lists x_1, y_1 — fit with  y_1 ~ m x_1 + b  (any model, e.g. a*e^(b x_1))\n• sum(n,1,10,n^2)   int(0,1,x^2)   abs, sqrt, ln, log, nCr, floor …\n• Click a curve for zeros, extrema & intersections' });
+    const it = newItem('note', { text: 'Syntax cheat-sheet\n• y = x^2, x = y^2, r = 2 sin(3θ)\n• Implicit: x^2 + y^2 = 4   Inequality: y < sin(x), 1 < x < 3\n• Parametric: (cos(t), sin(t)){0<=t<=2π}\n• Points: (1, 2) — drag them!\n• Functions: f(x) = x^2, then f(3) or f\'(x)\n• Sliders: type a new letter (a x) and click “add slider”\n• Restrict a domain: y = x^2 {x > 0}   Piecewise: y = {x<0: -x, x}\n• Lists: L=[1...10], [2,4...20], L^2, L[3], L[L>5], (L, L^2)\n• Stats: mean, median, total, stdev, variance, quartile, corr, cov, sort, join, unique, count\n• Tables make lists x_1, y_1 — fit with  y_1 ~ m x_1 + b  (any model, e.g. a*e^(b x_1))\n• sum(n,1,10,n^2)   int(0,1,x^2)   abs, sqrt, ln, log, nCr, floor …\n• Folders: + → Folder, then drag rows (grip = the number column) to reorder or move into folders\n• random(), random(5), shuffle(L), normpdf/normcdf/invnorm, binompdf/binomcdf, poissonpdf/poissoncdf\n• Residuals after a regression: e_1 → (x_1, e_1)\n• Click a curve for zeros, extrema & intersections' });
     state.items.unshift(it); $('#list').insertBefore(createRow(it), $('#list').firstChild); evaluate(); commitSoon(); saveSoon();
     $('#list').scrollTop = 0;
   }
@@ -1003,6 +1061,48 @@
       if (back) { const p = inp.selectionStart - back; inp.setSelectionRange(p, p); }
     }
     inp.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  function moveItem(id, targetId, after) {
+    const items = state.items;
+    const src = items.find((i) => i.id === id), tgt = items.find((i) => i.id === targetId);
+    if (!src || !tgt || id === targetId) return;
+    const block = src.type === 'folder' ? [src, ...items.filter((i) => i.parent === src.id)] : [src];
+    if (block.includes(tgt)) return;
+    let parent;
+    if (src.type === 'folder') parent = undefined;
+    else if (tgt.type === 'folder') parent = after ? tgt.id : undefined;
+    else parent = tgt.parent;
+    state.items = items.filter((i) => !block.includes(i));
+    const ti = state.items.indexOf(tgt);
+    if (parent === undefined) delete src.parent; else src.parent = parent;
+    state.items.splice(ti + (after ? 1 : 0), 0, ...block);
+    renderList(); evaluate(); commitSoon(); saveSoon();
+  }
+  function setupDnD() {
+    const list = $('#list'); let dragId = null;
+    const clear = () => list.querySelectorAll('.drop-before,.drop-after,.dragging').forEach((r) => r.classList.remove('drop-before', 'drop-after', 'dragging'));
+    list.addEventListener('dragstart', (e) => {
+      const g = e.target.closest && e.target.closest('.gutter'); const row = e.target.closest && e.target.closest('.row');
+      if (!g || !row) return;
+      dragId = +row.dataset.id; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(dragId));
+      row.classList.add('dragging');
+    });
+    list.addEventListener('dragover', (e) => {
+      if (dragId === null) return;
+      const row = e.target.closest('.row'); if (!row) return;
+      e.preventDefault();
+      list.querySelectorAll('.drop-before,.drop-after').forEach((r) => r.classList.remove('drop-before', 'drop-after'));
+      const r = row.getBoundingClientRect();
+      row.classList.add(e.clientY > r.top + r.height / 2 ? 'drop-after' : 'drop-before');
+    });
+    list.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const row = e.target.closest('.row');
+      if (row && dragId !== null) moveItem(dragId, +row.dataset.id, row.classList.contains('drop-after'));
+      dragId = null; clear();
+    });
+    list.addEventListener('dragend', () => { dragId = null; clear(); });
   }
 
   /* ================= init ================= */
@@ -1085,6 +1185,7 @@
       const up = () => { split.classList.remove('drag'); split.removeEventListener('pointermove', mv); split.removeEventListener('pointerup', up); graph.resize(); };
       split.addEventListener('pointermove', mv); split.addEventListener('pointerup', up);
     });
+    setupDnD();
     window.addEventListener('resize', () => graph.resize());
     if (innerWidth < 720) $('#btnKeypad').textContent = '⌨';
     window.__gc = { state: () => state, recs, graph, evaluate, setText: (i, t) => { const it = state.items[i]; it.text = t; const r = rows.get(it.id); r.inp.value = t; updatePretty(r); evaluate(); } };
