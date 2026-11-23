@@ -169,6 +169,15 @@
         }
         G.push(row);
       }
+      if (!p.helper) {
+        const pv = [];
+        for (let j = 0; j <= n; j++) for (let i = 0; i <= n; i++) {
+          const q = G[j][i]; if (!q) continue;
+          const pr = this._proj(this._n(q[0], q[1], q[2]));
+          if (pr) pv.push([pr[0], pr[1], pr[2], q[0], q[1], q[2], rg.u[0] + (rg.u[1] - rg.u[0]) * i / n, rg.v[0] + (rg.v[1] - rg.v[0]) * j / n]);
+        }
+        p._pv = pv;
+      }
       for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
         const a = G[j][i], bb = G[j][i + 1], c = G[j + 1][i + 1], d = G[j + 1][i];
         if (a && bb && c && d) this._poly(prims, [a, bb, c, d], col, p.alpha || 1);
@@ -180,6 +189,8 @@
       const stride = n + 1, vals = new Float64Array(stride * stride * stride);
       const px = (i) => b[0] + (b[1] - b[0]) * i / n, py = (j) => b[2] + (b[3] - b[2]) * j / n, pz = (k) => b[4] + (b[5] - b[4]) * k / n;
       for (let k = 0; k <= n; k++) for (let j = 0; j <= n; j++) for (let i = 0; i <= n; i++) vals[(k * stride + j) * stride + i] = p.g(px(i), py(j), pz(k));
+      const pvs = [];
+      const keep = (P) => { if (p.alpha) return; const cx = (P[0][0] + P[1][0] + P[2][0]) / 3, cy = (P[0][1] + P[1][1] + P[2][1]) / 3, cz = (P[0][2] + P[1][2] + P[2][2]) / 3; const pr = this._proj(this._n(cx, cy, cz)); if (pr) pvs.push([pr[0], pr[1], pr[2], cx, cy, cz]); };
       const interp = (A, B, va, vb) => { const t = va / (va - vb); return [A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t, A[2] + (B[2] - A[2]) * t]; };
       for (let k = 0; k < n; k++) for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
         const cv = [], cp = [];
@@ -197,13 +208,45 @@
           if (!ins.length || !outs.length) continue;
           const E = (a, c) => interp(cp[a], cp[c], cv[a], cv[c]);
           const al = p.alpha || 1;
-          if (ins.length === 1) this._poly(prims, [E(ins[0], outs[0]), E(ins[0], outs[1]), E(ins[0], outs[2])], col, al);
-          else if (ins.length === 3) this._poly(prims, [E(outs[0], ins[0]), E(outs[0], ins[1]), E(outs[0], ins[2])], col, al);
+          const emit = (P) => { this._poly(prims, P, col, al); keep(P); };
+          if (ins.length === 1) emit([E(ins[0], outs[0]), E(ins[0], outs[1]), E(ins[0], outs[2])]);
+          else if (ins.length === 3) emit([E(outs[0], ins[0]), E(outs[0], ins[1]), E(outs[0], ins[2])]);
           else {
             const q = [E(ins[0], outs[0]), E(ins[0], outs[1]), E(ins[1], outs[1]), E(ins[1], outs[0])];
-            this._poly(prims, [q[0], q[1], q[2]], col, al); this._poly(prims, [q[0], q[2], q[3]], col, al);
+            emit([q[0], q[1], q[2]]); emit([q[0], q[2], q[3]]);
           }
         }
+      }
+      p._pv = p.alpha ? null : pvs;
+    }
+
+    // (picking vertices are stored by _isurf via p._pv)
+    // translucent solid for inequalities: depth-sorted voxel splats
+    _region(prims, p) {
+      const b = this.box, n = this.interacting ? 9 : 20, col = rgb(p.color);
+      const px = (i) => b[0] + (b[1] - b[0]) * (i + 0.5) / n, py = (j) => b[2] + (b[3] - b[2]) * (j + 0.5) / n, pz = (k) => b[4] + (b[5] - b[4]) * (k + 0.5) / n;
+      for (let k = 0; k < n; k++) for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+        if (!p.inside(px(i), py(j), pz(k))) continue;
+        const pr = this._proj(this._n(px(i), py(j), pz(k))); if (!pr) continue;
+        prims.push({ t: 'splat', d: pr[2], pr, r: this.f * (2 / n) * 0.85 / pr[2], c: `rgba(${col[0]},${col[1]},${col[2]},0.11)` });
+      }
+    }
+
+    // flat patch (tangent plane) spanned by unit vectors e1, e2 around origin o
+    _patch(prims, p) {
+      const n = 10, col = rgb(p.color), P = [];
+      for (let j = 0; j <= n; j++) {
+        const row = [];
+        for (let i = 0; i <= n; i++) {
+          const u = -p.h + 2 * p.h * i / n, v = -p.h + 2 * p.h * j / n;
+          const q = [p.o[0] + u * p.e1[0] + v * p.e2[0], p.o[1] + u * p.e1[1] + v * p.e2[1], p.o[2] + u * p.e1[2] + v * p.e2[2]];
+          row.push(this._inBox(q[0], q[1], q[2]) ? q : null);
+        }
+        P.push(row);
+      }
+      for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+        const a = P[j][i], bb = P[j][i + 1], c = P[j + 1][i + 1], d = P[j + 1][i];
+        if (a && bb && c && d) this._poly(prims, [a, bb, c, d], col, p.alpha || 0.4);
       }
     }
 
@@ -234,7 +277,8 @@
         try {
           if (p.kind === 'surf') this._surf(prims, p);
           else if (p.kind === 'psurf') this._psurf(prims, p);
-          else if (p.kind === 'isurf') this._isurf(prims, p);
+          else if (p.kind === 'isurf') { this._isurf(prims, p); if (p.inside && p.volume !== false) this._region(prims, p); }
+          else if (p.kind === 'patch') this._patch(prims, p);
           else if (p.kind === 'curve3') this._curve(prims, p);
           else if (p.kind === 'pt3') {
             const q = p.get();
@@ -249,6 +293,8 @@
           ctx.beginPath(); ctx.moveTo(q.pr[0][0], q.pr[0][1]);
           for (let i = 1; i < q.pr.length; i++) ctx.lineTo(q.pr[i][0], q.pr[i][1]);
           ctx.closePath(); ctx.fillStyle = q.c; ctx.fill(); ctx.strokeStyle = q.c; ctx.lineWidth = 0.6; ctx.stroke();
+        } else if (q.t === 'splat') {
+          ctx.beginPath(); ctx.arc(q.pr[0], q.pr[1], Math.max(1.5, q.r), 0, TAU); ctx.fillStyle = q.c; ctx.fill();
         } else if (q.t === 'seg') {
           ctx.beginPath(); ctx.moveTo(q.a[0], q.a[1]); ctx.lineTo(q.b[0], q.b[1]); ctx.strokeStyle = q.c; ctx.lineWidth = q.w; ctx.stroke();
         } else {
@@ -399,13 +445,13 @@
     _pick(mx, my) {
       let best = null, bd = 18;
       for (const p of this.plots) {
-        if (p.hidden || p.kind !== 'surf' || p.helper || !p._pv) continue;
+        if (p.hidden || !['surf', 'psurf', 'isurf'].includes(p.kind) || p.helper || !p._pv) continue;
         for (const v of p._pv) {
           const d = Math.hypot(v[0] - mx, v[1] - my);
-          if (d < bd - 0.01 || (best && Math.abs(d - bd) <= 0.01 && v[2] < best.z)) { bd = d; best = { plot: p, x: v[3], y: v[4], z: v[2] }; }
+          if (d < bd - 0.01 || (best && Math.abs(d - bd) <= 0.01 && v[2] < best.depth)) { bd = d; best = { plot: p, x: v[3], y: v[4], z: p.kind === 'surf' ? undefined : v[5], u: v[6], v: v[7], depth: v[2] }; }
         }
       }
-      this.onPick(best ? { plot: best.plot, x: best.x, y: best.y } : null);
+      this.onPick(best ? { plot: best.plot, x: best.x, y: best.y, z: best.z, u: best.u, v: best.v } : null);
     }
 
     exportPNG(cb) {

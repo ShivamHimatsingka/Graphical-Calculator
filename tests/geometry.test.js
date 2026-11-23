@@ -32,5 +32,55 @@ const n0 = geo.objects.length; run('delete', [[-1, -5]]);
 ok(geo.objects.length < n0 && !geo.objects.some((o) => o.t === 'par'), 'deleting a point removes the parallel built on it');
 geo.undo(); ok(geo.objects.some((o) => o.t === 'par'), 'undo restores deleted objects');
 
+
+// ---- transformations, bisector, area, conics (fresh construction)
+const geo2 = new sb.Geo(fakeGraph, {});
+const run2 = (tool, pts) => { geo2.setTool(tool); pts.forEach(([x, y]) => geo2.click(x, y)); };
+run2('point', [[1, 2]]);                         // A = (1,2)
+run2('point', [[0, -5]]); run2('point', [[4, -5]]); run2('line', [[0, -5], [4, -5]]); // mirror y = -5 (points are re-used)
+const mirror = geo2.objects.find((o) => o.t === 'line');
+geo2.tool = 'reflect'; geo2.pending = []; geo2.click(2, -5); geo2.click(1, 2);          // reference line, then the point
+const refl = geo2.objects.find((o) => o.t === 'tpt' && o.op === 'reflect'), rp = geo2.pos(refl);
+ok(refl && near(rp[0], 1) && near(rp[1], -12), 'reflection of (1,2) in y=-5 is (1,-12)');
+run2('point', [[0, 0]]);                         // O
+geo2.tool = 'rotate'; geo2.param.rotate = 90; geo2.pending = []; geo2.click(0, 0); geo2.click(1, 2);
+const rot = geo2.objects.filter((o) => o.t === 'tpt' && o.op === 'rotate').map((o) => geo2.pos(o))[0];
+ok(rot && near(rot[0], -2) && near(rot[1], 1), 'rotating (1,2) by 90° about the origin gives (-2,1)');
+geo2.tool = 'dilate'; geo2.param.dilate = 3; geo2.pending = []; geo2.click(0, 0); geo2.click(1, 2);
+const dil = geo2.objects.filter((o) => o.t === 'tpt' && o.op === 'dilate').map((o) => geo2.pos(o))[0];
+ok(dil && near(dil[0], 3) && near(dil[1], 6), 'dilating (1,2) by 3 about the origin gives (3,6)');
+// polygon (unit right triangle) -> area, translate
+const geo3 = new sb.Geo(fakeGraph, {});
+const run3 = (tool, pts) => { geo3.setTool(tool); pts.forEach(([x, y]) => geo3.click(x, y)); };
+run3('polygon', [[0, 0], [4, 0], [0, 3], [0, 0]]);
+const poly = geo3.objects.find((o) => o.t === 'poly');
+const pa = geo3.polyArea(poly); ok(pa && near(pa.area, 6) && near(pa.per, 12), 'triangle 3-4-5 has area 6 and perimeter 12');
+geo3.tool = 'area'; geo3.pending = []; geo3.click(2, 0.0);
+ok(geo3.objects.some((o) => o.t === 'area'), 'area measurement object created');
+geo3.tool = 'translate'; geo3.pending = []; geo3.click(10, 10); geo3.click(11, 12);       // vector (1,2)
+geo3.click(4, 0);                                                                          // translate the point B=(4,0)
+const tr = geo3.objects.find((o) => o.t === 'tpt' && o.op === 'translate');
+ok(tr && near(geo3.pos(tr)[0], 5) && near(geo3.pos(tr)[1], 2), 'translation by (1,2)');
+// bisector of the right angle at the origin points along (1,1)
+const geo4 = new sb.Geo(fakeGraph, {});
+geo4.setTool('bisector'); [[4, 0], [0, 0], [0, 4]].forEach(([x, y]) => geo4.click(x, y));
+const bis = geo4.shape(geo4.objects.find((o) => o.t === 'bis'));
+ok(bis && near(bis.d[0], bis.d[1]) && bis.d[0] > 0, 'angle bisector direction is (1,1)');
+// conics: every sampled point satisfies the focal definition
+const geo5 = new sb.Geo(fakeGraph, {});
+geo5.setTool('ellipse'); [[-3, 0], [3, 0], [0, 4]].forEach(([x, y]) => geo5.click(x, y));
+const ell = geo5.shape(geo5.objects.find((o) => o.t === 'ell')), ep = geo5.conicPolys(ell)[0];
+ok(ell && near(ell.a, 5) && near(ell.b, 4) && ep.every((p) => Math.abs(Math.hypot(p[0] + 3, p[1]) + Math.hypot(p[0] - 3, p[1]) - 10) < 1e-6), 'ellipse: PF1+PF2 = 2a = 10');
+const geo6 = new sb.Geo(fakeGraph, {});
+geo6.setTool('hyperbola'); [[-5, 0], [5, 0], [3, 2.4]].forEach(([x, y]) => geo6.click(x, y));
+const hyp = geo6.shape(geo6.objects.find((o) => o.t === 'hyp'));
+const hd = Math.abs(Math.hypot(3 + 5, 2.4) - Math.hypot(3 - 5, 2.4));
+ok(hyp && geo6.conicPolys(hyp).length === 2 && geo6.conicPolys(hyp).every((poly) => poly.every((p) => Math.abs(Math.abs(Math.hypot(p[0] + 5, p[1]) - Math.hypot(p[0] - 5, p[1])) - hd) < 1e-5)), 'hyperbola: |PF1-PF2| constant');
+const geo7 = new sb.Geo(fakeGraph, {});
+geo7.setTool('line'); geo7.click(-8, -2); geo7.click(8, -2);                     // directrix y = -2
+geo7.setTool('parabola'); geo7.click(0, 2); geo7.click(3, -2);                    // focus (0,2)
+const par7 = geo7.shape(geo7.objects.find((o) => o.t === 'parab'));
+ok(par7 && geo7.conicPolys(par7)[0].every((p) => Math.abs(Math.hypot(p[0], p[1] - 2) - Math.abs(p[1] + 2)) < 1e-6), 'parabola: distance to focus equals distance to directrix');
+
 if (fails.length) { console.error(fails.join('\n')); process.exit(1); }
 console.log(`geometry tests: ${pass} passed`);

@@ -1,6 +1,10 @@
 /* ==========================================================
    Geometry mode: dynamic constructions on top of the 2D Graph.
-   Objects: pt, mid, int (points) · seg, line, ray, perp, par · circ · poly · ang, dist
+   Points:  pt (free) · mid · int (intersection) · tpt (transformed image)
+   Lines:   seg · line · ray · perp · par · bis (angle bisector)
+   Curves:  circ · ell · hyp · parab (conics)
+   Other:   poly · ang · dist · area
+   Transformations: reflect, rotate, dilate, translate
    Exposes window.Geo
    ========================================================== */
 (function (global) {
@@ -16,16 +20,29 @@
     { id: 'midpoint', icon: '⊹', label: 'Midpoint', hint: 'Click two points' },
     { id: 'perp', icon: '⟂', label: 'Perpendicular', hint: 'Click a point and a line (either order)' },
     { id: 'parallel', icon: '∥', label: 'Parallel', hint: 'Click a point and a line (either order)' },
+    { id: 'bisector', icon: '∠/', label: 'Bisector', hint: 'Click three points: the angle’s vertex is the middle one' },
     { id: 'intersect', icon: '✕', label: 'Intersect', hint: 'Click two lines/circles' },
     { id: 'polygon', icon: '▱', label: 'Polygon', hint: 'Click points; click the first point again to close' },
+    { id: 'ellipse', icon: '⬭', label: 'Ellipse', hint: 'Click two foci, then a point on the ellipse' },
+    { id: 'hyperbola', icon: '⌒⌒', label: 'Hyperbola', hint: 'Click two foci, then a point on the hyperbola' },
+    { id: 'parabola', icon: '∪', label: 'Parabola', hint: 'Click the focus, then the directrix line' },
+    { id: 'reflect', icon: '⇋', label: 'Reflect', hint: 'Click the mirror line, then click objects to reflect' },
+    { id: 'rotate', icon: '↻', label: 'Rotate', hint: 'Click the centre, then objects to rotate (angle in the box)', param: { label: 'angle °', value: 90 } },
+    { id: 'dilate', icon: '⤢', label: 'Dilate', hint: 'Click the centre, then objects to scale (factor in the box)', param: { label: 'factor', value: 2 } },
+    { id: 'translate', icon: '→', label: 'Translate', hint: 'Click the start and end of the vector, then objects to move' },
     { id: 'angle', icon: '∠', label: 'Angle', hint: 'Click three points (the vertex is the middle one)' },
     { id: 'distance', icon: '↔', label: 'Distance', hint: 'Click two points' },
+    { id: 'area', icon: '▨', label: 'Area', hint: 'Click a polygon or a circle to measure its area and perimeter' },
     { id: 'delete', icon: '⌫', label: 'Delete', hint: 'Click an object to delete it (and anything built on it)' },
   ];
-  const COLORS = { pt: '#2d70b3', curve: '#2d70b3', poly: '#6042a6', meas: '#c74440', hi: '#fa7e19' };
+  const POINT_TYPES = ['pt', 'mid', 'int', 'tpt'];
+  const LINE_TYPES = ['seg', 'line', 'ray', 'perp', 'par', 'bis'];
+  const CONIC_TYPES = ['ell', 'hyp', 'parab'];
+  const COLORS = { pt: '#2d70b3', curve: '#2d70b3', poly: '#6042a6', meas: '#c74440', hi: '#fa7e19', img: '#388c46' };
   const sub = (a, b) => [a[0] - b[0], a[1] - b[1]];
   const cross = (a, b) => a[0] * b[1] - a[1] * b[0];
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1];
+  const REF_KEYS = ['a', 'b', 'c', 'p', 'l', 'src', 'f1', 'f2', 'f', 'd'];
 
   class Geo {
     constructor(graph, opts) {
@@ -33,6 +50,7 @@
       this.opts = opts || {};
       this.objects = []; this.nextId = 1;
       this.tool = 'move'; this.pending = []; this.hover = null; this.drag = null;
+      this.param = { rotate: 90, dilate: 2 };
       this.history = [];
       this.plot = { id: -100, kind: 'custom', hidden: false, draw: (ctx, gr) => this.draw(ctx, gr) };
     }
@@ -44,16 +62,23 @@
     _changed() { this.g.requestDraw(false); if (this.opts.onChange) this.opts.onChange(); }
     undo() { const s = this.history.pop(); if (!s) return; const d = JSON.parse(s); this.objects = d.objects; this.nextId = d.nextId; this.pending = []; this._changed(); }
     clear() { if (!this.objects.length) return; this._snap(); this.objects = []; this.pending = []; this._changed(); }
-    setTool(t) { this.tool = t; this.pending = []; this.g.requestDraw(false); if (this.opts.onTool) this.opts.onTool(t, this.status()); }
+    setTool(t) { this.tool = t; this.pending = []; this.g.requestDraw(false); this._notify(); }
+    _notify() { if (this.opts.onTool) this.opts.onTool(this.tool, this.status()); }
     status() { const t = TOOLS.find((x) => x.id === this.tool); return t ? t.hint + (this.pending.length ? `  ·  ${this.pending.length} selected` : '') : ''; }
 
     get(id) { return this.objects.find((o) => o.id === id); }
-    _name() {
+    _name(base) {
       const used = new Set(this.objects.map((o) => o.name));
+      if (base) { let n = base + "'"; while (used.has(n)) n += "'"; return n; }
       for (let k = 0; k < 700; k++) { const n = String.fromCharCode(65 + (k % 26)) + (k >= 26 ? Math.floor(k / 26) : ''); if (!used.has(n)) return n; }
       return 'P';
     }
-    _add(o) { o.id = this.nextId++; if (['pt', 'mid', 'int'].includes(o.t)) o.name = this._name(); this.objects.push(o); return o; }
+    _add(o) {
+      o.id = this.nextId++;
+      if (POINT_TYPES.includes(o.t)) { const s = o.t === 'tpt' ? this.get(o.src) : null; o.name = this._name(s && s.name); }
+      this.objects.push(o); return o;
+    }
+    isPoint(o) { return !!o && POINT_TYPES.includes(o.t); }
 
     /* ---------- evaluation ---------- */
     pos(o, depth) {
@@ -63,6 +88,19 @@
       if (o.t === 'int') {
         const A = this.shape(this.get(o.a), depth + 1), B = this.shape(this.get(o.b), depth + 1);
         return A && B ? this._intersect(A, B, o.k) : null;
+      }
+      if (o.t === 'tpt') {
+        const P = this.pos(this.get(o.src), depth + 1); if (!P) return null;
+        if (o.op === 'reflect') {
+          const L = this.shape(this.get(o.l), depth + 1); if (!L) return null;
+          const t = dot(sub(P, L.p), L.d) / dot(L.d, L.d), f = [L.p[0] + t * L.d[0], L.p[1] + t * L.d[1]];
+          return [2 * f[0] - P[0], 2 * f[1] - P[1]];
+        }
+        if (o.op === 'translate') { const a = this.pos(this.get(o.a), depth + 1), b = this.pos(this.get(o.b), depth + 1); return a && b ? [P[0] + b[0] - a[0], P[1] + b[1] - a[1]] : null; }
+        const C = this.pos(this.get(o.c), depth + 1); if (!C) return null;
+        if (o.op === 'dilate') return [C[0] + o.v * (P[0] - C[0]), C[1] + o.v * (P[1] - C[1])];
+        const th = o.v * Math.PI / 180, cs = Math.cos(th), sn = Math.sin(th), d = sub(P, C);
+        return [C[0] + cs * d[0] - sn * d[1], C[1] + sn * d[0] + cs * d[1]];
       }
       return null;
     }
@@ -78,17 +116,64 @@
           if (!l || !p) return null;
           return { k: 'line', p, d: o.t === 'perp' ? [-l.d[1], l.d[0]] : l.d };
         }
+        case 'bis': {
+          const a = this.pos(this.get(o.a), depth + 1), b = this.pos(this.get(o.b), depth + 1), c = this.pos(this.get(o.c), depth + 1);
+          if (!a || !b || !c) return null;
+          const u = sub(a, b), v = sub(c, b), lu = Math.hypot(...u), lv = Math.hypot(...v); if (!lu || !lv) return null;
+          let d = [u[0] / lu + v[0] / lv, u[1] / lu + v[1] / lv];
+          if (Math.hypot(...d) < 1e-9) d = [-u[1] / lu, u[0] / lu];
+          return { k: 'line', p: b, d };
+        }
         case 'circ': {
           const c = this.pos(this.get(o.c), depth + 1), q = this.pos(this.get(o.p), depth + 1);
           if (!c || !q) return null;
           const r = Math.hypot(q[0] - c[0], q[1] - c[1]);
           return r > 0 ? { k: 'circ', c, r } : null;
         }
+        case 'ell': case 'hyp': {
+          const f1 = this.pos(this.get(o.f1), depth + 1), f2 = this.pos(this.get(o.f2), depth + 1), q = this.pos(this.get(o.p), depth + 1);
+          if (!f1 || !f2 || !q) return null;
+          const c = [(f1[0] + f2[0]) / 2, (f1[1] + f2[1]) / 2], cf = Math.hypot(f2[0] - f1[0], f2[1] - f1[1]) / 2;
+          if (cf < 1e-9) return null;
+          const d1 = Math.hypot(q[0] - f1[0], q[1] - f1[1]), d2 = Math.hypot(q[0] - f2[0], q[1] - f2[1]);
+          const u = [(f2[0] - f1[0]) / (2 * cf), (f2[1] - f1[1]) / (2 * cf)];
+          if (o.t === 'ell') { const a = (d1 + d2) / 2; if (a <= cf + 1e-9) return null; return { k: 'conic', type: 'ell', c, u, a, b: Math.sqrt(a * a - cf * cf) }; }
+          const a = Math.abs(d1 - d2) / 2; if (a < 1e-9 || a >= cf - 1e-9) return null;
+          return { k: 'conic', type: 'hyp', c, u, a, b: Math.sqrt(cf * cf - a * a) };
+        }
+        case 'parab': {
+          const f = this.pos(this.get(o.f), depth + 1), L = this.shape(this.get(o.d), depth + 1);
+          if (!f || !L) return null;
+          const dl = Math.hypot(...L.d), t = [L.d[0] / dl, L.d[1] / dl];
+          let n = [-t[1], t[0]];
+          const sgn = dot(sub(f, L.p), n); if (Math.abs(sgn) < 1e-9) return null;
+          if (sgn < 0) n = [-n[0], -n[1]];
+          const dist = Math.abs(sgn), foot = [f[0] - n[0] * dist, f[1] - n[1] * dist];
+          return { k: 'conic', type: 'par', v: [foot[0] + n[0] * dist / 2, foot[1] + n[1] * dist / 2], t, n, p: dist };
+        }
         default: return null;
       }
     }
+    // world-space polyline(s) of a conic, extended to cover the visible area
+    conicPolys(S) {
+      const r = this.g.range(), ext = 3 * Math.hypot(r.xmax - r.xmin, r.ymax - r.ymin);
+      const polys = [];
+      const mk = (fn, t0, t1, n) => { const pts = []; for (let i = 0; i <= n; i++) pts.push(fn(t0 + (t1 - t0) * i / n)); return pts; };
+      if (S.type === 'ell') {
+        const w = [-S.u[1], S.u[0]];
+        polys.push(mk((t) => [S.c[0] + S.a * Math.cos(t) * S.u[0] + S.b * Math.sin(t) * w[0], S.c[1] + S.a * Math.cos(t) * S.u[1] + S.b * Math.sin(t) * w[1]], 0, Math.PI * 2, 240));
+      } else if (S.type === 'hyp') {
+        const w = [-S.u[1], S.u[0]], T = Math.min(8, Math.asinh(ext / S.b));
+        for (const sg of [1, -1]) polys.push(mk((t) => [S.c[0] + sg * S.a * Math.cosh(t) * S.u[0] + S.b * Math.sinh(t) * w[0], S.c[1] + sg * S.a * Math.cosh(t) * S.u[1] + S.b * Math.sinh(t) * w[1]], -T, T, 240));
+      } else {
+        const R = ext;
+        polys.push(mk((s) => [S.v[0] + S.t[0] * s + S.n[0] * s * s / (2 * S.p), S.v[1] + S.t[1] * s + S.n[1] * s * s / (2 * S.p)], -R, R, 400));
+      }
+      return polys;
+    }
     _inRange(k, t) { return k === 'seg' ? t >= -1e-9 && t <= 1 + 1e-9 : k === 'ray' ? t >= -1e-9 : true; }
     _intersect(A, B, k) {
+      if (A.k === 'conic' || B.k === 'conic') return null;
       if (A.k !== 'circ' && B.k !== 'circ') {
         const den = cross(A.d, B.d); if (Math.abs(den) < 1e-12) return null;
         const w = sub(B.p, A.p), t = cross(w, B.d) / den, u = cross(w, A.d) / den;
@@ -110,6 +195,19 @@
       if (!this._inRange(L.k, t)) return null;
       return [L.p[0] + t * L.d[0], L.p[1] + t * L.d[1]];
     }
+    polyArea(o) {
+      const P = o.pts.map((id) => this.pos(this.get(id))); if (P.some((p) => !p)) return null;
+      let s = 0, per = 0;
+      for (let i = 0; i < P.length; i++) { const a = P[i], b = P[(i + 1) % P.length]; s += a[0] * b[1] - b[0] * a[1]; per += Math.hypot(b[0] - a[0], b[1] - a[1]); }
+      return { area: Math.abs(s) / 2, per, c: [P.reduce((q, p) => q + p[0], 0) / P.length, P.reduce((q, p) => q + p[1], 0) / P.length] };
+    }
+    measure(o) { // for 'area' objects
+      const t = this.get(o.target);
+      if (!t) return null;
+      if (t.t === 'poly') return this.polyArea(t);
+      if (t.t === 'circ') { const S = this.shape(t); return S ? { area: Math.PI * S.r * S.r, per: 2 * Math.PI * S.r, c: S.c } : null; }
+      return null;
+    }
 
     /* ---------- drawing ---------- */
     draw(ctx, g) {
@@ -118,19 +216,19 @@
       const sx = (p) => g.X(p[0]), sy = (p) => g.Y(p[1]);
       const hi = (o) => this.pending.includes(o.id) || this.hover === o.id;
       const r = g.range(), ext = 4 * Math.hypot(r.xmax - r.xmin, r.ymax - r.ymin);
-      // polygons first
       for (const o of this.objects) if (o.t === 'poly') {
         const pts = o.pts.map((id) => this.pos(this.get(id))); if (pts.some((p) => !p)) continue;
         ctx.beginPath(); pts.forEach((p, i) => (i ? ctx.lineTo(sx(p), sy(p)) : ctx.moveTo(sx(p), sy(p)))); ctx.closePath();
         ctx.fillStyle = COLORS.poly + '33'; ctx.fill(); ctx.strokeStyle = hi(o) ? COLORS.hi : COLORS.poly; ctx.lineWidth = hi(o) ? 3.4 : 2.2; ctx.stroke();
       }
-      // lines, circles
       for (const o of this.objects) {
         const S = this.shape(o); if (!S) continue;
         ctx.strokeStyle = hi(o) ? COLORS.hi : COLORS.curve; ctx.lineWidth = hi(o) ? 3.4 : 2.2;
         ctx.beginPath();
         if (S.k === 'circ') ctx.arc(sx(S.c), sy(S.c), S.r * g.view.sx, 0, Math.PI * 2);
-        else {
+        else if (S.k === 'conic') {
+          for (const poly of this.conicPolys(S)) poly.forEach((p, i) => (i ? ctx.lineTo(sx(p), sy(p)) : ctx.moveTo(sx(p), sy(p))));
+        } else {
           const dl = Math.hypot(S.d[0], S.d[1]), u = [S.d[0] / dl, S.d[1] / dl];
           let a = S.p, b;
           if (S.k === 'seg') b = [S.p[0] + S.d[0], S.p[1] + S.d[1]];
@@ -140,7 +238,6 @@
         }
         ctx.stroke();
       }
-      // measurements
       ctx.font = '13px -apple-system, "Segoe UI", Roboto, sans-serif';
       for (const o of this.objects) {
         if (o.t === 'dist') {
@@ -153,20 +250,22 @@
           const v1 = sub(a, b), v2 = sub(c, b), l1 = Math.hypot(...v1), l2 = Math.hypot(...v2); if (!l1 || !l2) continue;
           const ang = Math.acos(Math.max(-1, Math.min(1, dot(v1, v2) / (l1 * l2))));
           const a1 = Math.atan2(-v1[1], v1[0]), a2 = Math.atan2(-v2[1], v2[0]);
-          const ccw = cross(v1, v2) > 0; // world ccw == canvas counter-clockwise
+          const ccw = cross(v1, v2) > 0;
           ctx.strokeStyle = COLORS.meas; ctx.lineWidth = hi(o) ? 3 : 1.8; ctx.beginPath();
           ctx.arc(sx(b), sy(b), 26, a1, a2, ccw); ctx.stroke();
           const mid = a1 + (ccw ? -ang / 2 : ang / 2);
           this._label(ctx, `${+(ang * 180 / Math.PI).toFixed(2)}°`, sx(b) + Math.cos(mid) * 46, sy(b) + Math.sin(mid) * 46, COLORS.meas);
+        } else if (o.t === 'area') {
+          const m = this.measure(o); if (!m) continue;
+          this._label(ctx, `Area = ${+m.area.toFixed(4)}   P = ${+m.per.toFixed(4)}`, sx(m.c) - 56, sy(m.c), COLORS.meas);
         }
       }
-      // points last
       for (const o of this.objects) {
-        if (!['pt', 'mid', 'int'].includes(o.t)) continue;
+        if (!POINT_TYPES.includes(o.t)) continue;
         const p = this.pos(o); if (!p) continue;
         const x = sx(p), y = sy(p), h = hi(o);
         ctx.beginPath(); ctx.arc(x, y, h ? 8 : 6.5, 0, Math.PI * 2); ctx.fillStyle = g.theme.bg; ctx.fill();
-        ctx.beginPath(); ctx.arc(x, y, h ? 6.2 : 4.8, 0, Math.PI * 2); ctx.fillStyle = h ? COLORS.hi : (o.t === 'pt' ? COLORS.pt : '#6a6a6a'); ctx.fill();
+        ctx.beginPath(); ctx.arc(x, y, h ? 6.2 : 4.8, 0, Math.PI * 2); ctx.fillStyle = h ? COLORS.hi : (o.t === 'pt' ? COLORS.pt : o.t === 'tpt' ? COLORS.img : '#6a6a6a'); ctx.fill();
         this._label(ctx, o.name, x + 10, y - 10, g.theme.text, true);
       }
       ctx.restore();
@@ -181,7 +280,7 @@
     /* ---------- hit testing ---------- */
     hit(wx, wy, only) {
       const g = this.g, sxp = (x) => g.X(x), syp = (y) => g.Y(y), mx = sxp(wx), my = syp(wy);
-      const pts = this.objects.filter((o) => ['pt', 'mid', 'int'].includes(o.t));
+      const pts = this.objects.filter((o) => POINT_TYPES.includes(o.t));
       if (only !== 'curve') for (let i = pts.length - 1; i >= 0; i--) {
         const p = this.pos(pts[i]); if (p && Math.hypot(sxp(p[0]) - mx, syp(p[1]) - my) < 11) return pts[i];
       }
@@ -194,14 +293,19 @@
         if (o.t === 'poly') {
           const P = o.pts.map((id) => this.pos(this.get(id))); if (P.some((p) => !p)) continue;
           for (let k = 0; k < P.length; k++) { const a = P[k], b = P[(k + 1) % P.length]; d = Math.min(d, segDist([sxp(a[0]), syp(a[1])], [sxp(b[0]), syp(b[1])])); }
-        } else if (o.t === 'dist' || o.t === 'ang') {
-          const ids = o.t === 'dist' ? [o.a, o.b] : [o.a, o.b, o.c]; const P = ids.map((id) => this.pos(this.get(id))); if (P.some((p) => !p)) continue;
-          const c = P[o.t === 'ang' ? 1 : 0], q = o.t === 'ang' ? [c[0], c[1]] : [(P[0][0] + P[1][0]) / 2, (P[0][1] + P[1][1]) / 2];
-          d = Math.hypot(sxp(q[0]) - mx, syp(q[1]) - my) - (o.t === 'ang' ? 26 : 0); d = Math.abs(d) * (o.t === 'ang' ? 1 : 1) + (o.t === 'dist' ? 0 : 0);
-          if (o.t === 'dist') d = segDist([sxp(P[0][0]), syp(P[0][1])], [sxp(P[1][0]), syp(P[1][1])]);
+        } else if (o.t === 'dist') {
+          const P = [o.a, o.b].map((id) => this.pos(this.get(id))); if (P.some((p) => !p)) continue;
+          d = segDist([sxp(P[0][0]), syp(P[0][1])], [sxp(P[1][0]), syp(P[1][1])]);
+        } else if (o.t === 'ang') {
+          const b = this.pos(this.get(o.b)); if (!b) continue;
+          d = Math.abs(Math.hypot(sxp(b[0]) - mx, syp(b[1]) - my) - 26);
+        } else if (o.t === 'area') {
+          const m = this.measure(o); if (!m) continue;
+          d = Math.hypot(sxp(m.c[0]) - mx, syp(m.c[1]) - my) - 40; d = Math.max(0, d);
         } else {
           const S = this.shape(o); if (!S) continue;
           if (S.k === 'circ') d = Math.abs(Math.hypot(sxp(S.c[0]) - mx, syp(S.c[1]) - my) - S.r * g.view.sx);
+          else if (S.k === 'conic') { for (const poly of this.conicPolys(S)) for (let k = 1; k < poly.length; k++) d = Math.min(d, segDist([sxp(poly[k - 1][0]), syp(poly[k - 1][1])], [sxp(poly[k][0]), syp(poly[k][1])])); }
           else {
             const dl = Math.hypot(S.d[0], S.d[1]), u = [S.d[0] / dl, S.d[1] / dl];
             let a = S.p, b;
@@ -249,6 +353,19 @@
       this._snap();
       return this._add({ t: 'pt', x: +wx.toFixed(4), y: +wy.toFixed(4) });
     }
+    _transform(h, ref) {
+      const tool = this.tool, cache = new Map();
+      const base = { op: tool };
+      if (tool === 'reflect') base.l = ref[0];
+      else if (tool === 'translate') { base.a = ref[0]; base.b = ref[1]; }
+      else { base.c = ref[0]; base.v = +this.param[tool]; if (!Number.isFinite(base.v)) base.v = tool === 'rotate' ? 90 : 2; }
+      const img = (id) => { if (!cache.has(id)) cache.set(id, this._add(Object.assign({ t: 'tpt', src: id }, base)).id); return cache.get(id); };
+      if (POINT_TYPES.includes(h.t)) { img(h.id); return true; }
+      if (['seg', 'line', 'ray'].includes(h.t)) { this._add({ t: h.t, a: img(h.a), b: img(h.b) }); return true; }
+      if (h.t === 'circ') { this._add({ t: 'circ', c: img(h.c), p: img(h.p) }); return true; }
+      if (h.t === 'poly') { this._add({ t: 'poly', pts: h.pts.map(img) }); return true; }
+      return false;
+    }
     click(wx, wy) {
       const tool = this.tool, P = this.pending;
       if (tool === 'move') { this.hover = null; return false; }
@@ -257,8 +374,24 @@
         this._snap(); this._remove(h.id); this._changed(); return true;
       }
       if (tool === 'point') { const h = this.hit(wx, wy, 'point'); if (!h) { this._snap(); this._add({ t: 'pt', x: +wx.toFixed(4), y: +wy.toFixed(4) }); this._changed(); } return true; }
-      const finish = (o) => { this._add(o); this.pending = []; this._changed(); if (this.opts.onTool) this.opts.onTool(this.tool, this.status()); };
-      const needPts = { segment: 2, line: 2, ray: 2, circle: 2, midpoint: 2, distance: 2, angle: 3 }[tool];
+      const finish = (o) => { this._add(o); this.pending = []; this._changed(); this._notify(); };
+
+      // transformations: first pick the reference, then click objects to transform
+      if (['reflect', 'rotate', 'dilate', 'translate'].includes(tool)) {
+        const need = tool === 'translate' ? 2 : 1;
+        if (P.length < need) {
+          if (tool === 'reflect') {
+            const h = this.hit(wx, wy, 'curve');
+            if (h && LINE_TYPES.includes(h.t)) P.push(h.id);
+          } else { const p = this._pointAt(wx, wy); if (!P.includes(p.id)) P.push(p.id); }
+          this.g.requestDraw(false); this._notify(); return true;
+        }
+        const h = this.hit(wx, wy); if (!h) return true;
+        this._snap();
+        if (this._transform(h, P)) this._changed(); else { this.history.pop(); if (this.opts.toast) this.opts.toast('That kind of object cannot be transformed yet'); }
+        return true;
+      }
+      const needPts = { segment: 2, line: 2, ray: 2, circle: 2, midpoint: 2, distance: 2, angle: 3, bisector: 3, ellipse: 3, hyperbola: 3 }[tool];
       if (needPts) {
         const p = this._pointAt(wx, wy);
         if (P.includes(p.id)) { this.g.requestDraw(false); return true; }
@@ -272,19 +405,22 @@
           else if (tool === 'circle') finish({ t: 'circ', c: a, p: b });
           else if (tool === 'midpoint') finish({ t: 'mid', a, b });
           else if (tool === 'distance') finish({ t: 'dist', a, b });
+          else if (tool === 'bisector') finish({ t: 'bis', a, b, c });
+          else if (tool === 'ellipse') finish({ t: 'ell', f1: a, f2: b, p: c });
+          else if (tool === 'hyperbola') finish({ t: 'hyp', f1: a, f2: b, p: c });
           else finish({ t: 'ang', a, b, c });
-        } else { this.g.requestDraw(false); if (this.opts.onTool) this.opts.onTool(tool, this.status()); }
+        } else { this.g.requestDraw(false); this._notify(); }
         return true;
       }
-      if (tool === 'perp' || tool === 'parallel') {
+      if (tool === 'perp' || tool === 'parallel' || tool === 'parabola') {
         const pHit = this.hit(wx, wy, 'point'), lHit = pHit ? null : this.hit(wx, wy, 'curve');
-        const isLine = (o) => o && ['seg', 'line', 'ray', 'perp', 'par'].includes(o.t);
-        let pt = P.find((id) => ['pt', 'mid', 'int'].includes(this.get(id).t)), ln = P.find((id) => isLine(this.get(id)));
+        const isLine = (o) => o && LINE_TYPES.includes(o.t);
+        let pt = P.find((id) => this.isPoint(this.get(id))), ln = P.find((id) => isLine(this.get(id)));
         if (pHit) { if (pt === undefined) { P.push(pHit.id); pt = pHit.id; } }
         else if (isLine(lHit)) { if (ln === undefined) { P.push(lHit.id); ln = lHit.id; } }
         else if (!lHit && pt === undefined) { this._snap(); const np = this._add({ t: 'pt', x: +wx.toFixed(4), y: +wy.toFixed(4) }); P.push(np.id); pt = np.id; }
-        if (pt !== undefined && ln !== undefined) { this._snap(); finish({ t: tool === 'perp' ? 'perp' : 'par', p: pt, l: ln }); }
-        else { this.g.requestDraw(false); if (this.opts.onTool) this.opts.onTool(tool, this.status()); }
+        if (pt !== undefined && ln !== undefined) { this._snap(); finish(tool === 'parabola' ? { t: 'parab', f: pt, d: ln } : { t: tool === 'perp' ? 'perp' : 'par', p: pt, l: ln }); }
+        else { this.g.requestDraw(false); this._notify(); }
         return true;
       }
       if (tool === 'intersect') {
@@ -297,17 +433,22 @@
           const need = (A.k === 'circ' || B.k === 'circ') ? 2 : 1;
           let made = 0;
           for (let k = 0; k < need; k++) if (this._intersect(A, B, k)) { this._add({ t: 'int', a: P[0], b: P[1], k }); made++; }
-          if (!made && this.opts.toast) this.opts.toast('These objects do not intersect');
+          if (!made && this.opts.toast) this.opts.toast(A.k === 'conic' || B.k === 'conic' ? 'Intersections with conics are not supported yet' : 'These objects do not intersect');
           this.pending = []; this._changed();
         } else this.g.requestDraw(false);
-        if (this.opts.onTool) this.opts.onTool(tool, this.status());
+        this._notify();
         return true;
       }
       if (tool === 'polygon') {
         const p = this._pointAt(wx, wy);
         if (P.length >= 3 && p.id === P[0]) { this._snap(); const pts = P.slice(); finish({ t: 'poly', pts }); return true; }
         if (!P.includes(p.id)) P.push(p.id);
-        this.g.requestDraw(false); if (this.opts.onTool) this.opts.onTool(tool, this.status());
+        this.g.requestDraw(false); this._notify();
+        return true;
+      }
+      if (tool === 'area') {
+        const h = this.hit(wx, wy, 'curve');
+        if (h && (h.t === 'poly' || h.t === 'circ')) { this._snap(); finish({ t: 'area', target: h.id }); }
         return true;
       }
       return false;
@@ -319,7 +460,7 @@
         changed = false;
         for (const o of this.objects) {
           if (dead.has(o.id)) continue;
-          const refs = [o.a, o.b, o.c, o.p, o.l].filter((v) => typeof v === 'number').concat(o.pts || []);
+          const refs = REF_KEYS.map((k) => o[k]).filter((v) => typeof v === 'number').concat(o.pts || [], typeof o.target === 'number' ? [o.target] : []);
           if (refs.some((r) => dead.has(r))) { dead.add(o.id); changed = true; }
         }
       }

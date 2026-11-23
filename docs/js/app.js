@@ -334,27 +334,75 @@
   }
 
   let plots3Base = [];
-  const plane = { on: false, a: 0, b: 0, id: null, info: null };
+  const plane = { on: false, a: 0, b: 0, id: null, pt: null, info: null };
+  const isTangentable = (q) => !q.hidden && !q.helper && (q.kind === 'surf' || q.kind === 'psurf' || (q.kind === 'isurf' && !q.alpha));
+  const unit = (v) => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
+  const cross3 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  function computeTangent(sp) {
+    // returns { P, n, kind, extra } or null
+    const bx = state.settings.box || [-5, 5, -5, 5, -5, 5];
+    if (sp.kind === 'surf') {
+      const f = (x, y) => { const v = sp.f(x, y); return Number.isFinite(v) ? v : NaN; };
+      const a = plane.a, b = plane.b, z0 = f(a, b), h = 1e-5 * Math.max(1, Math.abs(a), Math.abs(b));
+      const fx = (f(a + h, b) - f(a - h, b)) / (2 * h), fy = (f(a, b + h) - f(a, b - h)) / (2 * h);
+      if (![z0, fx, fy].every(Number.isFinite)) return null;
+      return { P: [a, b, z0], n: [-fx, -fy, 1], zform: { fx, fy, c: z0 - fx * a - fy * b } };
+    }
+    if (sp.kind === 'psurf') {
+      const u = plane.a, v = plane.b, h = 1e-5, F = (uu, vv) => sp.f(uu, vv);
+      const P = F(u, v), Pu1 = F(u + h, v), Pu0 = F(u - h, v), Pv1 = F(u, v + h), Pv0 = F(u, v - h);
+      if (![P, Pu1, Pu0, Pv1, Pv0].every((q) => q && q.every(Number.isFinite))) return null;
+      const Pu = Pu1.map((q, i) => (q - Pu0[i]) / (2 * h)), Pv = Pv1.map((q, i) => (q - Pv0[i]) / (2 * h));
+      const n = cross3(Pu, Pv); if (Math.hypot(...n) < 1e-9) return null;
+      return { P, n, e1: unit(Pu) };
+    }
+    // implicit surface: Newton-project the picked point, then use the gradient
+    const g = sp.g, h = 1e-5;
+    let P = plane.pt ? plane.pt.slice() : null; if (!P) return null;
+    const grad = (q) => [(g(q[0] + h, q[1], q[2]) - g(q[0] - h, q[1], q[2])) / (2 * h), (g(q[0], q[1] + h, q[2]) - g(q[0], q[1] - h, q[2])) / (2 * h), (g(q[0], q[1], q[2] + h) - g(q[0], q[1], q[2] - h)) / (2 * h)];
+    for (let k = 0; k < 4; k++) { const gr = grad(P), v = g(P[0], P[1], P[2]), l2 = gr[0] ** 2 + gr[1] ** 2 + gr[2] ** 2; if (!(l2 > 1e-14) || !Number.isFinite(v)) break; P = P.map((c, i) => c - v * gr[i] / l2); }
+    const n = grad(P); if (!n.every(Number.isFinite) || Math.hypot(...n) < 1e-9) return null;
+    return { P, n };
+  }
   function applyPlane() {
     const extra = [];
-    const surfs = plots3Base.filter((q) => q.kind === 'surf' && !q.hidden);
+    const surfs = plots3Base.filter(isTangentable);
     const bar = $('#surfbar');
     if (bar) bar.hidden = !(state.settings.mode === '3d' && surfs.length);
     plane.info = null;
-    if (plane.on && surfs.length) {
-      const sp = surfs.find((q) => q.id === plane.id) || surfs[0];
-      const f = (x, y) => { const v = sp.f(x, y); return Number.isFinite(v) ? v : NaN; };
-      const a = plane.a, b = plane.b, z0 = f(a, b);
-      const h = 1e-5 * Math.max(1, Math.abs(a), Math.abs(b));
-      const fx = (f(a + h, b) - f(a - h, b)) / (2 * h), fy = (f(a, b + h) - f(a, b - h)) / (2 * h);
-      if ([z0, fx, fy].every(Number.isFinite)) {
-        extra.push({ id: -1, kind: 'surf', helper: true, alpha: 0.38, color: '#fa7e19', f: (x, y) => z0 + fx * (x - a) + fy * (y - b) });
-        extra.push({ id: -2, kind: 'pt3', get: () => [a, b, z0], color: '#fa7e19', size: 6 });
-        plane.info = { a, b, z0, fx, fy, c: z0 - fx * a - fy * b };
+    const sp = surfs.find((q) => q.id === plane.id) || surfs[0];
+    const la = $('#spLA'), lb = $('#spLB');
+    if (sp && la) {
+      la.textContent = sp.kind === 'psurf' ? 'u' : 'x'; lb.textContent = sp.kind === 'psurf' ? 'v' : 'y';
+      $('#spA').disabled = $('#spB').disabled = sp.kind === 'isurf';
+    }
+    if (plane.on && sp) {
+      const T = computeTangent(sp);
+      if (T) {
+        const bx = state.settings.box || [-5, 5, -5, 5, -5, 5];
+        const half = 0.3 * Math.min(bx[1] - bx[0], bx[3] - bx[2], bx[5] - bx[4]);
+        const n = unit(T.n);
+        let e1 = T.e1;
+        if (!e1) { const helper = Math.abs(n[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0]; e1 = unit(cross3(n, helper)); }
+        const e2 = unit(cross3(n, e1));
+        extra.push({ id: -1, kind: 'patch', helper: true, alpha: 0.42, color: '#fa7e19', o: T.P, e1, e2, h: half });
+        extra.push({ id: -2, kind: 'pt3', get: () => T.P, color: '#fa7e19', size: 6 });
+        // normalised plane  A x + B y + C z = D   (largest coefficient = ±1)
+        const m = Math.max(Math.abs(n[0]), Math.abs(n[1]), Math.abs(n[2])) || 1;
+        const A = n[0] / m, B = n[1] / m, C = n[2] / m, D = (n[0] * T.P[0] + n[1] * T.P[1] + n[2] * T.P[2]) / m;
+        plane.info = { A, B, C, D, P: T.P, zform: T.zform };
       }
     }
     const info = $('#spInfo');
-    if (info) { const t = plane.info ? `z = ${fmt(plane.info.fx, 4)}x ${plane.info.fy < 0 ? '−' : '+'} ${fmt(Math.abs(plane.info.fy), 4)}y ${plane.info.c < 0 ? '−' : '+'} ${fmt(Math.abs(plane.info.c), 4)}\n(slope in x: ${fmt(plane.info.fx, 4)}, in y: ${fmt(plane.info.fy, 4)})` : ''; if (info.textContent !== t) info.textContent = t; }
+    if (info) {
+      let t = '';
+      if (plane.info) {
+        const I = plane.info, f4 = (v) => fmt(v, 4), sg = (v) => (v < 0 ? '−' : '+');
+        t = I.zform ? `z = ${f4(I.zform.fx)}x ${sg(I.zform.fy)} ${f4(Math.abs(I.zform.fy))}y ${sg(I.zform.c)} ${f4(Math.abs(I.zform.c))}\n` : `${f4(I.A)}x ${sg(I.B)} ${f4(Math.abs(I.B))}y ${sg(I.C)} ${f4(Math.abs(I.C))}z = ${f4(I.D)}\n`;
+        t += `touching point (${f4(I.P[0])}, ${f4(I.P[1])}, ${f4(I.P[2])}) · normal (${f4(I.A)}, ${f4(I.B)}, ${f4(I.C)})`;
+      }
+      if (info.textContent !== t) info.textContent = t;
+    }
     graph3.setPlots(plots3Base.concat(extra));
     graph3.requestDraw(false);
   }
@@ -654,7 +702,14 @@
     if (ops.some((o) => o === '=')) throw new ME.MathError('Cannot mix = with inequalities');
     if (P.some((n) => fvOf(n).has('z') && !defined.has('z'))) {
       rec.kind = 'isurf'; needMissing(allNodes(), ['x', 'y', 'z']);
-      ops.forEach((op, i) => plots.push(Object.assign(base(), { kind: 'isurf', alpha: 0.4, g: ME.compile({ t: 'bin', op: '-', a: P[i], b: P[i + 1] }, ['x', 'y', 'z']) })));
+      const gs = ops.map((op, i) => ({ op, g: ME.compile({ t: 'bin', op: '-', a: P[i], b: P[i + 1] }, ['x', 'y', 'z']) }));
+      const cond3 = mkCond(['x', 'y', 'z']);
+      const inside = (x, y, z) => {
+        for (const t of gs) { const v = t.g(x, y, z); if (!(t.op === '<' ? v < 0 : t.op === '<=' ? v <= 0 : t.op === '>' ? v > 0 : v >= 0)) return false; }
+        return !cond3 || cond3(x, y, z);
+      };
+      rec.isIneq3 = true;
+      gs.forEach((t, i) => plots.push(Object.assign(base(), { kind: 'isurf', alpha: 0.4, g: t.g, inside: i === 0 ? inside : null, volume: !item.noVolume })));
       return;
     }
     rec.kind = 'ineq'; needMissing(allNodes(), ['x', 'y']);
@@ -1183,6 +1238,7 @@
     }
     if (rec && rec.kind === 'point') html += `<div class="sec"><h4>Label</h4><label>Show label <input type="checkbox" data-showlabel ${item.showLabel ? 'checked' : ''}></label><label>Text <input type="text" data-label value="${esc(item.label || '')}" placeholder="coordinates"></label></div>`;
     if (rec && rec.kind === 'action') html += `<div class="sec"><h4>Ticker</h4><label>Interval (ms) <input type="number" min="16" step="10" data-tickms value="${item.tickMs || 200}"></label></div>`;
+    if (rec && rec.isIneq3) html += `<div class="sec"><h4>3D region</h4><label>Volume shading <input type="checkbox" data-vol ${item.noVolume ? '' : 'checked'}></label></div>`;
     if (rec && rec.hasPoints) html += `<div class="sec"><label>Connect points with a line <input type="checkbox" data-line ${item.showLine ? 'checked' : ''}></label></div>`;
     html += '<div class="btns"><button data-act="dup">Duplicate</button><button data-act="del" class="danger">Delete</button></div>';
     pop.innerHTML = html;
@@ -1204,6 +1260,7 @@
     const sl1 = pop.querySelector('[data-showlabel]'); if (sl1) sl1.onchange = () => { item.showLabel = sl1.checked; redraw(); };
     const sl2 = pop.querySelector('[data-label]'); if (sl2) sl2.oninput = () => { item.label = sl2.value; if (item.showLabel) redraw(); };
     const tk = pop.querySelector('[data-tickms]'); if (tk) tk.onchange = () => { item.tickMs = Math.max(16, parseInt(tk.value, 10) || 200); if (tickers.has(item.id)) { stopTicker(item.id); toggleTicker(item); } saveSoon(); };
+    const vol = pop.querySelector('[data-vol]'); if (vol) vol.onchange = () => { item.noVolume = !vol.checked; redraw(); };
     const lc = pop.querySelector('[data-line]'); if (lc) lc.onchange = () => { item.showLine = lc.checked; redraw(); };
     pop.querySelector('[data-act="del"]').onclick = () => deleteItem(item.id);
     pop.querySelector('[data-act="dup"]').onclick = () => { closePopovers(); duplicateItem(item.id); };
@@ -1284,7 +1341,10 @@
     ['Tangent & secant lines', ['y=x^3/6-x', { type: 'note', text: 'Click the curve, then switch on Tangent / Secant in the bar at the bottom.' }]],
     ['Domain colouring', [{ __view: [-3, 3, -2.25, 2.25] }, { type: 'note', text: 'Hue = argument of f(z), brightness bands = log |f(z)|. Zeros are where all colours meet.' }, '(z^2-1)/(z^2+1)']],
     ['3D surface', [{ __mode: '3d' }, 'a=1', 'z=a*sin(x)*cos(y)', 'z=x^2/10+y^2/10-4']],
-    ['3D inequality (translucent)', [{ __mode: '3d' }, 'z<4-x^2/4-y^2/4', 'x^2+y^2+z^2<=9']],
+    ['3D inequality (volume shading)', [{ __mode: '3d' }, 'z<4-x^2/4-y^2/4', 'x^2+y^2+z^2<=9']],
+    ['Tangent plane to a torus', [{ __mode: '3d' }, '((3+cos(v))cos(u), (3+cos(v))sin(u), sin(v)){0<=u<=2pi, 0<=v<=2pi}', { type: 'note', text: 'Click the torus: a tangent plane is placed at that point (bottom bar). Works for z=f(x,y), parametric and implicit surfaces.' }]],
+    ['Tangent plane to a sphere', [{ __mode: '3d' }, 'x^2+y^2+z^2=9', { type: 'note', text: 'Click the sphere to place a tangent plane.' }]],
+    ['Geometry: reflection, ellipse, area', [{ __app: 'geometry' }]],
     ['3D curve & points', [{ __mode: '3d' }, '(2cos(t), 2sin(t), t/2){-6<=t<=6}', '(0,0,0)', '(2,0,0)']],
     ['3D parametric surface (torus)', [{ __mode: '3d' }, '((3+cos(v))cos(u), (3+cos(v))sin(u), sin(v)){0<=u<=2pi, 0<=v<=2pi}']],
     ['3D implicit surface (sphere)', [{ __mode: '3d' }, 'x^2+y^2+z^2=9']],
@@ -1302,10 +1362,31 @@
     ['Regression from a table', [{ type: 'table', rows: [['1', '2.1'], ['2', '3.9'], ['3', '6.2'], ['4', '7.8'], ['5', '10.1'], ['6', '12.2'], ['', '']] }, 'y_1 ~ m x_1 + b']],
     ['Quadratic regression', [{ type: 'table', rows: [['-3', '10'], ['-2', '4.5'], ['-1', '1.2'], ['0', '-0.5'], ['1', '1.1'], ['2', '4.2'], ['3', '9.8'], ['', '']] }, 'y_1 ~ a x_1^2 + b x_1 + c']],
   ];
+  function loadGeoDemo() {
+    // a ready-made construction: triangle, its reflection, rotation and an ellipse
+    const d = { objects: [], nextId: 1 };
+    const add = (o) => { o.id = d.nextId++; d.objects.push(o); return o.id; };
+    const pt = (x, y, name) => add({ t: 'pt', x, y, name });
+    const A = pt(-4, -1, 'A'), B = pt(-1, -1, 'B'), C = pt(-3, 1.5, 'C');
+    add({ t: 'poly', pts: [A, B, C] });
+    const m1 = pt(-2, -3, 'M'), m2 = pt(3, -3, 'N');
+    const mirror = add({ t: 'line', a: m1, b: m2 });
+    const img = (id, nm) => add({ t: 'tpt', src: id, op: 'reflect', l: mirror, name: nm });
+    const A2 = img(A, "A'"), B2 = img(B, "B'"), C2 = img(C, "C'");
+    add({ t: 'poly', pts: [A2, B2, C2] });
+    const f1 = pt(4, -1, 'F'), f2 = pt(8, -1, 'G'), q = pt(6, 1.2, 'P');
+    add({ t: 'ell', f1, f2, p: q });
+    const poly1 = d.objects.find((o) => o.t === 'poly');
+    add({ t: 'area', target: poly1.id });
+    geo.load(d); geo.setTool('move'); saveSoon();
+    graph.setRange(-9, 11, -9, 6);
+  }
   function loadExample(texts) {
     state.tableCount = 0;
     const modeEntry = texts.find((t) => typeof t === 'object' && t.__mode);
     const viewEntry = texts.find((t) => typeof t === 'object' && t.__view);
+    const appEntry = texts.find((t) => typeof t === 'object' && t.__app);
+    if (appEntry) { setApp('geometry'); loadGeoDemo(); return; }
     texts = texts.filter((t) => !(typeof t === 'object' && (t.__mode || t.__view)));
     let cur = null;
     state.items = texts.map((t) => {
@@ -1446,7 +1527,8 @@
   function buildGeoBar() {
     const bar = $('#geobar');
     bar.innerHTML = GEO_TOOLS.map((t) => `<button class="gt" data-tool="${t.id}" title="${t.label}: ${t.hint}"><span class="gi">${t.icon}</span><span class="gl">${t.label}</span></button>`).join('')
-      + '<span class="gsep"></span><button class="gt" data-act="undo" title="Undo"><span class="gi">↶</span><span class="gl">Undo</span></button><button class="gt" data-act="clear" title="Clear all"><span class="gi">🗑</span><span class="gl">Clear</span></button><button class="gt" data-act="grid" title="Toggle grid"><span class="gi">▦</span><span class="gl">Grid</span></button><div id="geohint"></div>';
+      + '<span class="gsep"></span><button class="gt" data-act="undo" title="Undo"><span class="gi">↶</span><span class="gl">Undo</span></button><button class="gt" data-act="clear" title="Clear all"><span class="gi">🗑</span><span class="gl">Clear</span></button><button class="gt" data-act="grid" title="Toggle grid"><span class="gi">▦</span><span class="gl">Grid</span></button><span id="geoParam" hidden><label id="geoParamLbl"></label> <input type="number" id="geoParamIn" step="any" aria-label="Transformation parameter"></span><div id="geohint"></div>';
+    $('#geoParamIn').oninput = () => { const v = parseFloat($('#geoParamIn').value); if (Number.isFinite(v) && (geo.tool === 'rotate' || geo.tool === 'dilate')) geo.param[geo.tool] = v; };
     bar.onclick = (e) => {
       const b = e.target.closest('button'); if (!b) return;
       if (b.dataset.tool) geo.setTool(b.dataset.tool);
@@ -1458,6 +1540,8 @@
   function geoToolChanged(tool, status) {
     $('#geobar').querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === tool));
     const h = $('#geohint'); if (h) h.textContent = status || '';
+    const def = GEO_TOOLS.find((t) => t.id === tool), box = $('#geoParam');
+    if (box) { box.hidden = !(def && def.param); if (def && def.param) { $('#geoParamLbl').textContent = def.param.label; if (document.activeElement !== $('#geoParamIn')) $('#geoParamIn').value = geo.param[tool]; } }
   }
   function setApp(name) {
     const S = state.settings;
@@ -1566,14 +1650,19 @@
     graph3.onPick = (hit) => {
       if (!hit) return;
       const r = (v) => parseFloat(v.toPrecision(4));
-      plane.id = hit.plot.id; plane.on = true; plane.a = r(hit.x); plane.b = r(hit.y);
+      plane.id = hit.plot.id; plane.on = true;
+      if (hit.plot.kind === 'psurf') { plane.a = r(hit.u); plane.b = r(hit.v); }
+      else { plane.a = r(hit.x); plane.b = r(hit.y); }
+      plane.pt = hit.plot.kind === 'isurf' ? [hit.x, hit.y, hit.z] : null;
       spOn.checked = true; spA.value = plane.a; spB.value = plane.b; applyPlane();
     };
     $('#spAdd').onclick = () => {
-      if (!plane.info) { toast('Turn on Tangent plane first (or click the surface)'); return; }
-      const i = plane.info, num = (v) => fmt(v, 6);
-      const last = state.items[state.items.length - 1];
-      addItem('expr', last && last.id, `z=${num(i.fx)}x${i.fy < 0 ? '-' : '+'}${num(Math.abs(i.fy))}y${i.c < 0 ? '-' : '+'}${num(Math.abs(i.c))}`);
+      if (!plane.info) { toast('Turn on Tangent plane first (or click a surface)'); return; }
+      const I = plane.info, num = (v) => fmt(v, 6), last = state.items[state.items.length - 1];
+      const sg = (v) => (v < 0 ? '-' : '+');
+      const text = I.zform ? `z=${num(I.zform.fx)}x${sg(I.zform.fy)}${num(Math.abs(I.zform.fy))}y${sg(I.zform.c)}${num(Math.abs(I.zform.c))}`
+        : `${num(I.A)}x${sg(I.B)}${num(Math.abs(I.B))}y${sg(I.C)}${num(Math.abs(I.C))}z=${num(I.D)}`;
+      addItem('expr', last && last.id, text);
       toast('Plane added to the list');
     };
     // tangent / secant bar

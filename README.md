@@ -15,7 +15,7 @@
   <img src="assets/web-domain-colouring.jpg" width="445" alt="Complex domain colouring of (z^2-1)/(z^2+1)">
 </p>
 <p align="center">
-  <img src="assets/web-geometry.jpg" width="445" alt="Geometry mode: triangle with angle and distance measurements and a circle">
+  <img src="assets/web-geometry.jpg" width="445" alt="Geometry mode: a triangle, its reflection in a line, an ellipse and an area measurement">
 </p>
 
 This repository contains two editions:
@@ -32,7 +32,7 @@ This repository contains two editions:
 **Three calculators in one** (☰ menu → *Calculator*)
 
 * **Graphing** — everything below
-* **Geometry** — dynamic constructions: points, segments, lines, rays, circles, midpoints, perpendicular & parallel lines, intersections, polygons, angle and distance measurements; drag any free point and everything built on it follows; undo, delete (with dependants)
+* **Geometry** — dynamic constructions: points, segments, lines, rays, circles, midpoints, perpendicular & parallel lines, **angle bisectors**, intersections, polygons, **ellipses, hyperbolas and parabolas** (focus/directrix definitions), angle / distance / **area & perimeter** measurements, and **transformations — reflect, rotate, dilate, translate** (works on points, segments, lines, rays, circles and polygons). Drag any free point and everything built on it follows; undo, delete (with dependants)
 * **Scientific** — a full-screen scientific calculator: sin/cos/tan & inverses (2nd), logs, powers, roots, factorial, %, EXP, ANS, memory (MC/MR/M+/M−), DEG/RAD, complex and list results, history
 
 **Graph anything**
@@ -42,7 +42,7 @@ This repository contains two editions:
 * Implicit curves, e.g. `x^2 + y^2 = 25`
 * Inequalities with shading, including chains: `y < x^2`, `1 < x < 3`
 * **Complex domain colouring**: type a function of `z` alone — `(z^2-1)/(z^2+1)`, `sin(z)`, `z^3-1` — and the plane is coloured by phase and magnitude
-* **3D graphs** (press the **3D** button): surfaces `z = f(x,y)`, parametric curves `(x(t), y(t), z(t))`, parametric surfaces `(x(u,v), y(u,v), z(u,v))`, implicit surfaces `x^2+y^2+z^2=9`, 3D inequalities (translucent) `z<4-x^2-y^2`, 3D points you can drag (Shift = up/down); **tangent planes** (click a surface); drag to rotate, wheel/pinch to zoom, adjustable box, auto-rotate
+* **3D graphs** (press the **3D** button): surfaces `z = f(x,y)`, parametric curves `(x(t), y(t), z(t))`, parametric surfaces `(x(u,v), y(u,v), z(u,v))`, implicit surfaces `x^2+y^2+z^2=9`, 3D inequalities (translucent) `z<4-x^2-y^2`, 3D points you can drag (Shift = up/down); **tangent planes for every kind of surface** (click a surface — `z=f(x,y)`, parametric or implicit — to place the plane and see its equation), **volume shading** for 3D inequalities; drag to rotate, wheel/pinch to zoom, adjustable box, auto-rotate
 * Points (drag them!) with optional labels, point lists, multi-column tables
 * Piecewise functions `{x<0: -x, x^2}` and domain restrictions `y = x^2 {x > 0}`
 
@@ -162,7 +162,7 @@ Graphical-Calculator/
 │       ├── latex.js         #   LaTeX <-> text converters for the live formula editor
 │       ├── graph.js         #   2D canvas renderer & interaction (marching squares, POIs, tracing, tangents, domain colouring)
 │       ├── graph3d.js       #   3D renderer (projection, shaded meshes, marching tetrahedra, picking & dragging)
-│       ├── geometry.js      #   geometry mode: constructions, intersections, measurements
+│       ├── geometry.js      #   geometry mode: constructions, transformations, conics, measurements
 │       ├── scientific.js    #   scientific calculator overlay
 │       └── app.js           #   UI, evaluation pipeline, sliders, tables, folders, regression
 ├── desktop/                 # 🖥️ Python/PySide6 edition
@@ -204,8 +204,10 @@ Graphical-Calculator/
 - [x] 3D inequalities, tangent planes and draggable 3D points
 - [x] Geometry and scientific calculator modes
 - [x] Bar plots, more statistics functions, robust multi-start regression
-- [ ] Geometry: transformations (reflect / rotate / dilate), conics, angle bisectors, polygon area
-- [ ] 3D: tangent planes for parametric/implicit surfaces, volume shading
+- [x] Geometry: transformations (reflect / rotate / dilate / translate), conics, angle bisectors, polygon area
+- [x] 3D: tangent planes for parametric and implicit surfaces, volume shading
+- [ ] Geometry: intersections with conics, transforming perpendicular/parallel lines and conics, loci
+- [ ] 3D: shadows / lighting options, sections of solids
 - [x] Geometry constructions are saved in autosave, JSON files and share links
 
 ---
