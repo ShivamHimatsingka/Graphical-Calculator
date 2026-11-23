@@ -163,6 +163,8 @@
           }
           if (sub) j = k;
         }
+        const dm = /^[0-9]+/.exec(s.slice(j));
+        if (!sub && dm && known.has(run + dm[0])) { toks.push({ t: 'id', v: run + dm[0] }); i = j + dm[0].length; continue; }
         // split the letter run into known names / single letters
         let p = 0;
         while (p < run.length) {
@@ -172,7 +174,7 @@
             const isLast = p + L === run.length;
             const full = isLast && sub ? cand + '_' + sub : cand;
             if (known.has(full)) { name = full; len = L; break; }
-            if (L > 1 && known.has(cand)) { name = cand; len = L; break; }
+            if (L > 1 && known.has(cand)) { name = isLast && sub ? cand + '_' + sub : cand; len = L; break; }
             if (L === 1) { name = full; len = 1; }
           }
           toks.push({ t: 'id', v: name });
