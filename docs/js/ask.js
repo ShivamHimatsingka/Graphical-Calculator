@@ -192,7 +192,7 @@ Explanation: friendly, step by step, numbered steps, short paragraphs, at most 2
   Ask.friendlyError = (e) => {
     if (e && e.name === 'AbortError') return 'Stopped.';
     const s = e && e.status;
-    if (s === 401) return 'The Pollinations key was not accepted. Check it in AI settings (it should start with pk_ or sk_).';
+    if (s === 401) return 'The Pollinations key was not accepted. Check it in AI settings (it must be a secret key starting with sk_; pk_ keys do not work).';
     if (s === 402 || s === 403) return 'This key has no credit left right now. Wait a while, or use a different free key.';
     if (s === 429) return 'Too many requests. Please wait a few seconds and try again.';
     if (s >= 500) return 'The AI service is having trouble. Please try again in a moment.';

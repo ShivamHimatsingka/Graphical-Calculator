@@ -43,7 +43,7 @@ This repository contains two editions:
 * **Verified results:** zeros, maxima/minima, intercepts and intersections are computed by the calculator itself (and marked on the graph), never taken from the AI's arithmetic.
 * **Built-in solver (no setup, works offline, nothing leaves your browser):** graph one or more equations, where two curves meet, circles, lines through two points, parabolas from a vertex, sine/cosine waves, derivatives and tangent lines, projectile motion, "fixed fee plus a rate" costs, doubling, percent growth and decay.
 * **AI helper (anything else, including word problems):** uses a free [Pollinations](https://enter.pollinations.ai) key that you paste once under *AI settings* (stored only in your browser). The model's answer is validated by the calculator's own parser, repaired automatically if a row is invalid, and any row that still can't be read is skipped. Costs nothing and needs no download or server.
-* Developers: you can ship a shared *publishable* key by setting `Ask.config.publishableKey` in `docs/js/ask.js` (rate-limited per visitor by Pollinations; see their docs before doing so).
+* Note: Pollinations publishable keys (`pk_`) cannot authenticate requests, and a secret `sk_` key must never be committed to a public repo, so each visitor pastes their own free `sk_` key.
 
 **Graph anything**
 

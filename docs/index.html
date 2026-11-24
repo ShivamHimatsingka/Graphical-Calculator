@@ -6,7 +6,7 @@
 <title>Graphical Calculator</title>
 <meta name="description" content="A Desmos-style graphing calculator that runs entirely in your browser.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232d70b3'/%3E%3Cpath d='M4 24 C10 24 10 8 16 8 S22 24 28 24' stroke='white' stroke-width='3' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="css/style.css?v=20261124c">
+<link rel="stylesheet" href="css/style.css?v=20261124d">
 </head>
 <body>
 <div id="app">
@@ -36,7 +36,7 @@
       <div class="ask-head"><b>✨ Ask</b><span class="grow"></span><button id="askSetBtn" class="ghost">AI settings</button><button id="askClear" class="ghost">Clear</button><button id="askClose" class="ib" aria-label="Close Ask">✕</button></div>
       <div id="askSettings" hidden>
         <p class="amuted">The built-in solver runs entirely in your browser. For anything else, the <b>AI helper</b> uses a free <a href="https://enter.pollinations.ai" target="_blank" rel="noopener">Pollinations</a> key. Your key and questions go only to Pollinations, never to us.</p>
-        <div class="ask-keyrow"><input id="askKeyIn" type="password" placeholder="Paste your free Pollinations key (pk_… or sk_…)" autocomplete="off" spellcheck="false"><button id="askKeySave" class="chip">Save</button><button id="askKeyClear" class="chip">Remove</button></div>
+        <div class="ask-keyrow"><input id="askKeyIn" type="password" placeholder="Paste your free Pollinations key (secret key, starts with sk_)" autocomplete="off" spellcheck="false"><button id="askKeySave" class="chip">Save</button><button id="askKeyClear" class="chip">Remove</button></div>
         <div id="askKeyState" class="amuted"></div>
         <label class="ask-model">Model <select id="askModel"><option value="openai">Default (openai)</option></select></label>
       </div>
@@ -105,14 +105,14 @@ window.mlReady = new Promise(function (resolve) {
   document.head.appendChild(s);
 });
 </script>
-<script src="js/mathengine.js?v=20261124c"></script>
-<script src="js/latex.js?v=20261124c"></script>
-<script src="js/graph.js?v=20261124c"></script>
-<script src="js/graph3d.js?v=20261124c"></script>
-<script src="js/geometry.js?v=20261124c"></script>
-<script src="js/scientific.js?v=20261124c"></script>
-<script src="js/matrix.js?v=20261124c"></script>
-<script src="js/ask.js?v=20261124c"></script>
-<script src="js/app.js?v=20261124c"></script>
+<script src="js/mathengine.js?v=20261124d"></script>
+<script src="js/latex.js?v=20261124d"></script>
+<script src="js/graph.js?v=20261124d"></script>
+<script src="js/graph3d.js?v=20261124d"></script>
+<script src="js/geometry.js?v=20261124d"></script>
+<script src="js/scientific.js?v=20261124d"></script>
+<script src="js/matrix.js?v=20261124d"></script>
+<script src="js/ask.js?v=20261124d"></script>
+<script src="js/app.js?v=20261124d"></script>
 </body>
 </html>
