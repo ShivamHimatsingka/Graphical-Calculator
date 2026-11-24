@@ -333,12 +333,18 @@
     }
     const p2 = plots.filter((q) => !THREE_D.has(q.kind)), p3 = plots.filter((q) => THREE_D.has(q.kind));
     graph.setPlots(state.settings.app === 'geometry' ? [geo.plot] : p2); plots3Base = p3; applyPlane();
-    if (p3.length && !p2.some((q) => !q.hidden) && state.settings.mode !== '3d') { setMode('3d'); return; }
+    // switch to 3D automatically only when an item has *just become* 3D (so the 2D button always works)
+    const ids3 = new Set(p3.map((q) => q.id));
+    const fresh3 = [...ids3].some((id) => !prev3Ids.has(id));
+    const firstRun = !seen3;
+    prev3Ids = ids3; seen3 = true;
+    if (!firstRun && fresh3 && !p2.some((q) => !q.hidden) && state.settings.mode !== '3d') { setMode('3d'); return; }
     updateAllRows();
     graph.requestDraw(false); graph3.requestDraw(false);
   }
 
   let plots3Base = [];
+  let prev3Ids = new Set(), seen3 = false;
   const plane = { on: false, a: 0, b: 0, id: null, pt: null, info: null };
   const isTangentable = (q) => !q.hidden && !q.helper && (q.kind === 'surf' || q.kind === 'psurf' || (q.kind === 'isurf' && !q.alpha));
   const unit = (v) => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
@@ -1015,7 +1021,9 @@
         mf.mathVirtualKeyboardPolicy = 'manual'; mf.smartFence = true; mf.smartSuperscript = true; mf.removeExtraneousParentheses = true;
         mf.setAttribute('placeholder', '\\text{Type an expression, e.g. y = x²}');
         row.ed = mathEd(mf);
-        setTimeout(() => row.ed.set(item.text), 0);
+        // load the stored text once the element is ready — but never overwrite what the user has already typed
+        mf.addEventListener('input', () => { row.touched = true; });
+        if (item.text) setTimeout(() => { if (!row.touched) row.ed.set(item.text); }, 0);
       } else {
         row.ed = plainEd(row.inp);
         const base = row.ed.set; row.ed.set = (v) => { base.call(row.ed, v); updatePretty(row); };
@@ -1048,6 +1056,11 @@
     $('.gear', e).addEventListener('click', (ev) => openItemPopover(item, ev.currentTarget));
     $('.del', e).addEventListener('click', () => deleteItem(item.id));
     e.addEventListener('focusin', (ev) => { document.querySelectorAll('.row.focus').forEach((r) => r.classList.remove('focus')); e.classList.add('focus'); const t = ev.target; if (row.ed && (t === row.ed.el || (row.ed.el.contains && row.ed.el.contains(t)))) lastEd = row.ed; else if (t && t.matches && t.matches('input:not([type=range]):not([type=checkbox]),textarea')) lastEd = plainEd(t); else if (row.ed) lastEd = row.ed; });
+    e.addEventListener('click', (ev) => {
+      // clicking anywhere in a row (not on a control) puts the cursor in it, like Desmos
+      if (ev.target.closest('button, input, textarea, select, a, math-field, .slider, .chip, .tbl, .imgbox, .acts')) return;
+      if (row.ed) row.ed.focus(true);
+    });
     e.addEventListener('mouseenter', () => { if (graph && graph.highlightId !== item.id) { graph.highlightId = item.id; graph.requestDraw(false); } });
     e.addEventListener('mouseleave', () => { if (graph && graph.highlightId === item.id) { graph.highlightId = null; graph.requestDraw(false); } });
     e.addEventListener('focusout', () => setTimeout(() => { if (!e.contains(document.activeElement)) e.classList.remove('focus'); }, 0));
@@ -1318,6 +1331,14 @@
 
   /* ================= popovers & menus ================= */
   function closePopovers() { $('#modeMenu').hidden = true; $('#pop').hidden = true; $('#gset').hidden = true; $('#mainMenu').hidden = true; $('#addMenu').hidden = true; }
+  // keep a dropdown fully on screen: open towards the side with more room and scroll inside it
+  function fitMenu(menu, anchor) {
+    menu.classList.remove('up'); menu.style.maxHeight = '';
+    const a = anchor.getBoundingClientRect(), below = innerHeight - a.bottom - 10, above = a.top - 10;
+    if (below < 320 && above > below) { menu.classList.add('up'); menu.style.maxHeight = Math.max(160, above) + 'px'; }
+    else menu.style.maxHeight = Math.max(160, below) + 'px';
+    menu.scrollTop = 0;
+  }
   function place(pop, anchor) {
     pop.hidden = false;
     const a = anchor.getBoundingClientRect(), w = pop.offsetWidth, h = pop.offsetHeight;
@@ -1815,7 +1836,7 @@
   function buildModeFab() {
     const menu = $('#modeMenu');
     menu.innerHTML = '<div class="lbl">Calculator</div><button data-app="graph">Graphing calculator</button><button data-app="geometry">Geometry</button><button data-app="scientific">Scientific calculator</button><button data-app="basic">Four-function calculator</button><button data-app="matrix">Matrix calculator</button>';
-    $('#btnModes').onclick = (e) => { e.stopPropagation(); const wasHidden = menu.hidden; closePopovers(); menu.hidden = !wasHidden; };
+    $('#btnModes').onclick = (e) => { e.stopPropagation(); const wasHidden = menu.hidden; closePopovers(); menu.hidden = !wasHidden; if (!menu.hidden) fitMenu(menu, $('#btnModes')); };
     menu.onclick = (e) => { const b = e.target.closest('button[data-app]'); if (!b) return; menu.hidden = true; setApp(b.dataset.app); };
   }
   function setApp(name) {
@@ -1893,9 +1914,9 @@
     hist = [snapshot()]; hIdx = 0; updateUndo();
 
     // toolbar
-    $('#btnAdd').onclick = (e) => { e.stopPropagation(); const m = $('#addMenu'); const h = m.hidden; closePopovers(); m.hidden = !h; };
+    $('#btnAdd').onclick = (e) => { e.stopPropagation(); const m = $('#addMenu'); const h = m.hidden; closePopovers(); m.hidden = !h; if (!m.hidden) fitMenu(m, $('#btnAdd')); };
     $('#addMenu').onclick = (e) => { const b = e.target.closest('button'); if (!b) return; closePopovers(); const last = state.items[state.items.length - 1]; addItem(b.dataset.add, last && last.id); };
-    $('#btnMenu').onclick = (e) => { e.stopPropagation(); const m = $('#mainMenu'); const h = m.hidden; closePopovers(); m.hidden = !h; };
+    $('#btnMenu').onclick = (e) => { e.stopPropagation(); const m = $('#mainMenu'); const h = m.hidden; closePopovers(); m.hidden = !h; if (!m.hidden) fitMenu(m, $('#btnMenu')); };
     $('#btnUndo').onclick = undo; $('#btnRedo').onclick = redo;
     $('#btnCollapse').onclick = () => { $('#app').classList.add('collapsed'); $('#btnExpand').hidden = false; setTimeout(() => graph.resize(), 30); };
     $('#btnExpand').onclick = () => { $('#app').classList.remove('collapsed'); $('#btnExpand').hidden = true; setTimeout(() => graph.resize(), 30); };
