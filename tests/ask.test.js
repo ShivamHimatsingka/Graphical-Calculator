@@ -55,5 +55,33 @@ ok(!/<script/i.test(html) && /<b>bold<\/b>/.test(html) && /<ol>/.test(html) && /
 ok(/key/i.test(Ask.friendlyError({ status: 401 })) && /wait/i.test(Ask.friendlyError({ status: 429 })) && /credit/i.test(Ask.friendlyError({ status: 402 })), 'friendly error messages');
 f = Ask.facts([fx((x) => x ** 3, 'f'), fx((x) => x ** 3, 'y=f(x)')]); ok(f.points.length <= 2 && !f.lines.some((l) => /meet at/.test(l)), 'identical curves are not reported as intersecting');
 
+// ---- providers (mock fetch)
+(async () => {
+  const P = Ask.providers; ok(['gemini', 'groq', 'openrouter', 'openai', 'anthropic', 'mistral', 'pollinations', 'custom'].every((k) => P[k]), 'provider registry');
+  const mk = (resp, cap) => async (u, o) => { cap.url = u; cap.opts = o; cap.body = JSON.parse(o.body); return resp; };
+  const okRes = (j) => ({ ok: true, status: 200, json: async () => j, text: async () => '' });
+  // OpenAI-style (default provider gemini; no key -> error)
+  let threw = false; try { await Ask.callAI([{ role: 'user', content: 'x' }], { fetch: async () => okRes({}) }); } catch (e) { threw = e.status === 401; } ok(threw, 'callAI without key throws 401');
+  const store = {}; sb.localStorage = { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: (k) => { delete store[k]; } };
+  Ask.setProviderId('groq'); Ask.setKey('gsk_abc'); ok(Ask.hasAI() && Ask.getProviderId() === 'groq', 'groq configured');
+  let cap = {}; let out = await Ask.callAI([{ role: 'system', content: 'S' }, { role: 'user', content: 'U' }], { fetch: mk(okRes({ choices: [{ message: { content: '{"a":1}' } }] }), cap) });
+  ok(out === '{"a":1}' && /groq/.test(cap.url) && cap.opts.headers.Authorization === 'Bearer gsk_abc' && cap.body.response_format, 'openai-style call');
+  // 400 on response_format -> retry without
+  let n = 0; out = await Ask.callAI([{ role: 'user', content: 'U' }], { fetch: async (u, o) => { n++; const b = JSON.parse(o.body); return b.response_format ? { ok: false, status: 400, text: async () => 'bad' } : okRes({ choices: [{ message: { content: 'ok2' } }] }); } });
+  ok(out === 'ok2' && n === 2, 'retries without response_format on 400');
+  // Anthropic
+  Ask.setProviderId('anthropic'); Ask.setKey('sk-ant-1'); cap = {};
+  out = await Ask.callAI([{ role: 'system', content: 'SYS' }, { role: 'user', content: 'U' }], { fetch: mk(okRes({ content: [{ type: 'text', text: 'claude says' }] }), cap) });
+  ok(out === 'claude says' && cap.body.system === 'SYS' && cap.body.messages.length === 1 && cap.body.max_tokens > 0 && cap.opts.headers['x-api-key'] === 'sk-ant-1' && cap.opts.headers['anthropic-dangerous-direct-browser-access'] === 'true', 'anthropic call shape');
+  // custom needs endpoint + model, key optional
+  Ask.setProviderId('custom'); ok(!Ask.hasAI(), 'custom not configured'); Ask.setEndpoint('http://localhost:11434/v1/chat/completions'); Ask.setModel('llama3'); ok(Ask.hasAI(), 'custom configured without key');
+  cap = {}; await Ask.callAI([{ role: 'user', content: 'U' }], { fetch: mk(okRes({ choices: [{ message: { content: 'x' } }] }), cap) }); ok(cap.url.startsWith('http://localhost:11434') && !cap.opts.headers.Authorization, 'custom call without auth header');
+  // errors
+  let e1; try { await Ask.callAI([{ role: 'user', content: 'U' }], { fetch: async () => { throw new TypeError('Failed to fetch'); } }); } catch (e) { e1 = e; }
+  ok(e1 && e1.network && /Could not reach/.test(Ask.friendlyError(e1)), 'network error is friendly');
+  Ask.setProviderId('gemini'); ok(/Google Gemini/.test(Ask.friendlyError({ status: 401 })) && /model/i.test(Ask.friendlyError({ status: 404 })), 'errors name the provider');
+  console.log(`ask provider tests done: ${pass} passed`); if (fails.length) { console.error(fails.join('\n')); process.exit(1); }
+})();
+
 if (fails.length) { console.error(fails.join('\n')); process.exit(1); }
 console.log(`ask tests: ${pass} passed`);

@@ -12,8 +12,9 @@
 (function (global) {
   'use strict';
 
-  const Ask = { config: { publishableKey: '', endpoint: 'https://gen.pollinations.ai/v1/chat/completions', modelsEndpoint: 'https://gen.pollinations.ai/v1/models', defaultModel: 'openai' } };
-  const KEY_STORE = 'graphical-calculator-pollinations-key', MODEL_STORE = 'graphical-calculator-pollinations-model';
+  const Ask = { config: { publishableKey: '' } };
+  const LS = 'graphical-calculator-ask-';
+  const store = { get: (k) => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }, set: (k, v) => { try { if (v) localStorage.setItem(k, v); else localStorage.removeItem(k); } catch (e) { /* ignore */ } } };
 
   const fmtN = (v) => { if (!Number.isFinite(v)) return String(v); if (Math.abs(v) < 1e-9) return '0'; return String(parseFloat(v.toPrecision(5))); };
   const num = (s) => parseFloat(String(s).replace(/[−–]/g, '-'));
@@ -185,31 +186,65 @@ Explanation: friendly, step by step, numbered steps, short paragraphs, at most 2
 
   /* ---------------- provider ---------------- */
   class AskError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
-  Ask.getKey = () => { try { return localStorage.getItem(KEY_STORE) || Ask.config.publishableKey || ''; } catch (e) { return Ask.config.publishableKey || ''; } };
-  Ask.setKey = (k) => { try { if (k) localStorage.setItem(KEY_STORE, k.trim()); else localStorage.removeItem(KEY_STORE); } catch (e) { /* ignore */ } };
-  Ask.getModel = () => { try { return localStorage.getItem(MODEL_STORE) || Ask.config.defaultModel; } catch (e) { return Ask.config.defaultModel; } };
-  Ask.setModel = (m) => { try { localStorage.setItem(MODEL_STORE, m); } catch (e) { /* ignore */ } };
+  /* Bring-your-own-key providers. Everything is called straight from the visitor's browser with their own key. */
+  Ask.providers = {
+    gemini: { label: 'Google Gemini (free tier)', kind: 'openai', endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', models: ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.5-flash-lite'], link: 'https://aistudio.google.com/apikey', hint: 'AIza…', free: true },
+    groq: { label: 'Groq (free tier)', kind: 'openai', endpoint: 'https://api.groq.com/openai/v1/chat/completions', models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'], link: 'https://console.groq.com/keys', hint: 'gsk_…', free: true },
+    openrouter: { label: 'OpenRouter (free models)', kind: 'openai', endpoint: 'https://openrouter.ai/api/v1/chat/completions', models: ['openrouter/free', 'meta-llama/llama-3.3-70b-instruct:free'], link: 'https://openrouter.ai/keys', hint: 'sk-or-…', free: true },
+    openai: { label: 'OpenAI', kind: 'openai', endpoint: 'https://api.openai.com/v1/chat/completions', models: ['gpt-4o-mini', 'gpt-4.1-mini', 'gpt-4.1'], link: 'https://platform.openai.com/api-keys', hint: 'sk-…' },
+    anthropic: { label: 'Anthropic Claude', kind: 'anthropic', endpoint: 'https://api.anthropic.com/v1/messages', models: ['claude-haiku-5-5', 'claude-sonnet-5-5'], link: 'https://console.anthropic.com/settings/keys', hint: 'sk-ant-…' },
+    mistral: { label: 'Mistral', kind: 'openai', endpoint: 'https://api.mistral.ai/v1/chat/completions', models: ['mistral-small-latest', 'mistral-large-latest'], link: 'https://console.mistral.ai/api-keys', hint: 'API key' },
+    pollinations: { label: 'Pollinations', kind: 'openai', endpoint: 'https://gen.pollinations.ai/v1/chat/completions', models: ['openai'], link: 'https://enter.pollinations.ai/keys', hint: 'sk_…' },
+    custom: { label: 'Custom / local (Ollama, LM Studio, …)', kind: 'openai', endpoint: '', models: [], custom: true, link: 'https://ollama.com', hint: 'API key (optional)' }
+  };
+  Ask.getProviderId = () => { const id = store.get(LS + 'provider'); return Ask.providers[id] ? id : 'gemini'; };
+  Ask.setProviderId = (id) => store.set(LS + 'provider', Ask.providers[id] ? id : '');
+  Ask.getProvider = () => Ask.providers[Ask.getProviderId()];
+  Ask.getKey = () => store.get(LS + 'key-' + Ask.getProviderId()) || (Ask.getProviderId() === 'pollinations' ? Ask.config.publishableKey : '') || '';
+  Ask.setKey = (k) => store.set(LS + 'key-' + Ask.getProviderId(), (k || '').trim());
+  Ask.getModel = () => store.get(LS + 'model-' + Ask.getProviderId()) || Ask.getProvider().models[0] || '';
+  Ask.setModel = (m) => store.set(LS + 'model-' + Ask.getProviderId(), (m || '').trim());
+  Ask.getEndpoint = () => { const p = Ask.getProvider(); return p.custom ? store.get(LS + 'endpoint') : p.endpoint; };
+  Ask.setEndpoint = (u) => store.set(LS + 'endpoint', (u || '').trim());
+  // true when a question could be sent to an AI right now
+  Ask.hasAI = () => { const p = Ask.getProvider(); return p.custom ? !!Ask.getEndpoint() && !!Ask.getModel() : !!Ask.getKey(); };
   Ask.friendlyError = (e) => {
     if (e && e.name === 'AbortError') return 'Stopped.';
-    const s = e && e.status;
-    if (s === 401) return 'The Pollinations key was not accepted. Check it in AI settings (it must be a secret key starting with sk_; pk_ keys do not work).';
-    if (s === 402 || s === 403) return 'This key has no credit left right now. Wait a while, or use a different free key.';
-    if (s === 429) return 'Too many requests. Please wait a few seconds and try again.';
-    if (s >= 500) return 'The AI service is having trouble. Please try again in a moment.';
-    return 'Could not reach the AI service. Check your connection and try again.';
+    const s = e && e.status; let name = 'AI';
+    try { name = Ask.getProvider().label.replace(/ \(.*\)$/, ''); } catch (err) { /* ignore */ }
+    if (s === 401 || s === 403 && /key|auth|permission/i.test((e && e.message) || '')) return `${name} did not accept the key. Open AI settings and check it (and that it belongs to ${name}).`;
+    if (s === 402 || s === 403) return `${name} says this key has no credit or access right now. Wait a while or try another provider in AI settings.`;
+    if (s === 404) return `${name} does not know that model. Pick another model in AI settings.`;
+    if (s === 429) return `${name} says too many requests. Please wait a few seconds and try again (free tiers are rate limited).`;
+    if (s >= 500) return `${name} is having trouble. Please try again in a moment.`;
+    if (e && e.network) return `Could not reach ${name} from the browser. Check your connection${Ask.getProvider().custom ? ', the address, and that the server allows web pages to call it (CORS)' : ''}.`;
+    return `Could not get an answer from ${name}. Check your connection and settings, then try again.`;
   };
   Ask.callAI = async (messages, opts) => {
     opts = opts || {};
-    const key = Ask.getKey(); if (!key) throw new AskError(401, 'no key');
-    const body = { model: opts.model || Ask.getModel(), messages, temperature: 0.2 };
+    const p = Ask.getProvider(), key = Ask.getKey(), url = Ask.getEndpoint(), model = opts.model || Ask.getModel();
+    if (!Ask.hasAI()) throw new AskError(401, 'not configured');
+    const doFetch = opts.fetch || fetch;
+    const send = async (headers, body) => {
+      let res;
+      try { res = await doFetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: opts.signal }); }
+      catch (e) { if (e && e.name === 'AbortError') throw e; const er = new AskError(0, String(e && e.message)); er.network = true; throw er; }
+      if (!res.ok) { const t = await res.text().catch(() => ''); throw new AskError(res.status, t.slice(0, 300)); }
+      return res.json();
+    };
+    if (p.kind === 'anthropic') {
+      const sys = messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n');
+      const body = { model, max_tokens: 3000, temperature: 0.2, system: sys, messages: messages.filter((m) => m.role !== 'system') };
+      const data = await send({ 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' }, body);
+      return data && data.content && data.content.map((c) => c.text || '').join('');
+    }
+    const headers = { 'Content-Type': 'application/json' }; if (key) headers.Authorization = 'Bearer ' + key;
+    const base = { model, messages, temperature: 0.2 };
     const go = async (withFormat) => {
-      const b = withFormat ? Object.assign({ response_format: { type: 'json_object' } }, body) : body;
-      const res = await (opts.fetch || fetch)(Ask.config.endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key }, body: JSON.stringify(b), signal: opts.signal });
-      if (!res.ok) { const t = await res.text().catch(() => ''); throw new AskError(res.status, t.slice(0, 200)); }
-      const data = await res.json();
+      const data = await send(headers, withFormat ? Object.assign({ response_format: { type: 'json_object' } }, base) : base);
       return data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
     };
-    try { return await go(true); } catch (e) { if (e.status === 400) return go(false); throw e; }
+    try { return await go(true); } catch (e) { if (e.status === 400 || e.status === 422) return go(false); throw e; }
   };
 
   Ask.userPrompt = (question, existingRows) => `Question: ${question}${existingRows && existingRows.length ? `\n\nRows already on the graph (do not repeat them unless asked): ${existingRows.slice(0, 12).join(' | ')}` : ''}`;
@@ -238,26 +273,26 @@ Explanation: friendly, step by step, numbered steps, short paragraphs, at most 2
     const scroll = () => { log.scrollTop = log.scrollHeight; };
     const bubble = (cls, html) => { const d = document.createElement('div'); d.className = 'ab ' + cls; d.innerHTML = html; log.appendChild(d); scroll(); return d; };
     const syncSettings = () => {
-      const k = Ask.getKey(); $('#askKeyIn').value = ''; $('#askKeyState').textContent = k ? `Key saved in this browser (${k.slice(0, 5)}…).` : 'No key yet — built-in rules still work.';
+      const p = Ask.getProvider(), id = Ask.getProviderId(), k = Ask.getKey();
+      $('#askProv').value = id; $('#askKeyIn').value = ''; $('#askKeyIn').placeholder = `Paste your API key (${p.hint})`;
+      $('#askEndRow').hidden = !p.custom; $('#askEndpoint').value = Ask.getEndpoint();
+      $('#askProvLink').innerHTML = p.custom ? 'Runs against any OpenAI-compatible address, e.g. a local Ollama or LM Studio server.' : `Get a key at <a href="${esc(p.link)}" target="_blank" rel="noopener">${esc(p.link.replace(/^https:\/\//, ''))}</a>${p.free ? ' — free tier available' : ''}.`;
+      $('#askKeyState').textContent = k ? `Key saved in this browser (${k.slice(0, 4)}…).` : (p.custom ? 'Key is optional for local servers.' : 'No key yet — the built-in solver still works.');
+      $('#askModels').innerHTML = p.models.map((m) => `<option value="${esc(m)}">`).join(''); $('#askModel').value = Ask.getModel();
+      $('#askSetBtn').classList.toggle('on', Ask.hasAI());
     };
+    $('#askProv').innerHTML = Object.keys(Ask.providers).map((id) => `<option value="${id}">${esc(Ask.providers[id].label)}</option>`).join('');
     syncSettings();
     $('#btnAsk').onclick = () => { panel.hidden = !panel.hidden; $('#btnAsk').classList.toggle('on', !panel.hidden); if (!panel.hidden) { api.relayout(); setTimeout(() => input.focus(), 30); } else api.relayout(); };
     $('#askClose').onclick = () => { panel.hidden = true; $('#btnAsk').classList.remove('on'); api.relayout(); };
     $('#askSetBtn').onclick = () => { setBox.hidden = !setBox.hidden; };
-    $('#askKeySave').onclick = () => { const v = $('#askKeyIn').value.trim(); if (v) { Ask.setKey(v); api.toast('Key saved in this browser'); } syncSettings(); };
+    $('#askProv').onchange = (e) => { Ask.setProviderId(e.target.value); syncSettings(); };
+    $('#askKeySave').onclick = () => { const v = $('#askKeyIn').value.trim(); if (v) { Ask.setKey(v); api.toast('Key saved in this browser'); } if (Ask.getProvider().custom) Ask.setEndpoint($('#askEndpoint').value); syncSettings(); };
+    $('#askEndpoint').onchange = (e) => { Ask.setEndpoint(e.target.value); syncSettings(); };
     $('#askKeyClear').onclick = () => { Ask.setKey(''); syncSettings(); api.toast('Key removed'); };
-    $('#askModel').onchange = (e) => Ask.setModel(e.target.value);
+    $('#askModel').onchange = (e) => { Ask.setModel(e.target.value); syncSettings(); };
     try { $('#askFresh').checked = localStorage.getItem('graphical-calculator-ask-fresh') === '1'; } catch (e) { /* ignore */ }
     $('#askFresh').onchange = (e) => { try { localStorage.setItem('graphical-calculator-ask-fresh', e.target.checked ? '1' : '0'); } catch (err) { /* ignore */ } };
-    const loadModels = async () => {
-      try {
-        const res = await fetch(Ask.config.modelsEndpoint); const data = await res.json();
-        const list = (data.data || []).filter((m) => (m.category === 'text' || (m.tags || []).some((t) => t.name === 'text')) && !m.paid_only && !(m.output_modalities || []).includes('image'));
-        const sel = $('#askModel'); sel.innerHTML = list.map((m) => `<option value="${esc(m.id)}">${esc(m.title || m.id)}</option>`).join('');
-        const cur = Ask.getModel(); sel.value = list.some((m) => m.id === cur) ? cur : (list.find((m) => (m.aliases || []).includes(cur)) || list[0] || {}).id || '';
-      } catch (e) { $('#askModel').innerHTML = '<option value="openai">Default (openai)</option>'; }
-    };
-    $('#askSetBtn').addEventListener('click', () => { if (!$('#askModel').dataset.loaded) { $('#askModel').dataset.loaded = '1'; loadModels(); } });
     document.querySelectorAll('.ask-chip').forEach((c) => { c.onclick = () => { input.value = c.dataset.q; send(); }; });
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
     sendBtn.onclick = () => { if (busy && ctrl) { ctrl.abort(); return; } send(); };
@@ -285,8 +320,8 @@ Explanation: friendly, step by step, numbered steps, short paragraphs, at most 2
       try {
         const rule = Ask.rules(q, global.ME);
         if (rule) { present(rule); return; }
-        if (!Ask.getKey()) {
-          bubble('bot', `<p>I can draw many standard requests with no setup, but this one needs the AI helper.</p><p><b>Free setup (1 minute):</b> get a free key at <a href="https://enter.pollinations.ai" target="_blank" rel="noopener">enter.pollinations.ai</a>, then open <b>AI settings</b> above and paste it. It stays in your browser only.</p><p class="amuted">Meanwhile try: “graph y = x^2 − 4x + 3”, “where do y = 2x + 1 and y = −x + 7 meet?”, “circle of radius 3 centred at (1, 2)”, or “a ball is thrown up at 20 m/s”.</p>`);
+        if (!Ask.hasAI()) {
+          bubble('bot', `<p>I can draw many standard requests with no setup, but this one needs an AI.</p><p><b>Connect one you already have (1 minute):</b> open <b>AI settings</b> above, pick a provider — <b>Google Gemini</b> and <b>Groq</b> have free keys; OpenAI, Anthropic, Mistral, OpenRouter, or a local Ollama/LM Studio server also work — and paste your key. It stays in your browser only.</p><p class="amuted">Meanwhile try: “graph y = x^2 − 4x + 3”, “where do y = 2x + 1 and y = −x + 7 meet?”, “circle of radius 3 centred at (1, 2)”, or “a ball is thrown up at 20 m/s”.</p>`);
           return;
         }
         const status = bubble('bot', '<span class="amuted">Thinking…</span>');

@@ -345,5 +345,5 @@ body.app-geo #btnFit, body.app-geo #btnSquare { display: none; }
 .ask-keyrow { display: flex; gap: 4px; margin: 6px 0 2px; }
 .ask-keyrow input { flex: 1; min-width: 0; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); }
 .ask-model { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
-.ask-model select { flex: 1; min-width: 0; padding: 4px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); }
+.ask-model select, .ask-model input { flex: 1; min-width: 0; padding: 4px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); }
 .ask-fresh { display: flex; align-items: center; gap: 6px; padding: 0 12px; font-size: 12px; color: var(--muted); }

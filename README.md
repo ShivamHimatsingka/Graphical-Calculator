@@ -42,8 +42,8 @@ This repository contains two editions:
 * Click **✨ Ask** and type an equation, a question or a word problem. The equations appear in **normal editable boxes** (in a folder named after your question) and on the graph, together with a **step-by-step explanation**. Parameters become sliders automatically; every answer has an **Undo** button.
 * **Verified results:** zeros, maxima/minima, intercepts and intersections are computed by the calculator itself (and marked on the graph), never taken from the AI's arithmetic.
 * **Built-in solver (no setup, works offline, nothing leaves your browser):** graph one or more equations, where two curves meet, circles, lines through two points, parabolas from a vertex, sine/cosine waves, derivatives and tangent lines, projectile motion, "fixed fee plus a rate" costs, doubling, percent growth and decay.
-* **AI helper (anything else, including word problems):** uses a free [Pollinations](https://enter.pollinations.ai) key that you paste once under *AI settings* (stored only in your browser). The model's answer is validated by the calculator's own parser, repaired automatically if a row is invalid, and any row that still can't be read is skipped. Costs nothing and needs no download or server.
-* Note: Pollinations publishable keys (`pk_`) cannot authenticate requests, and a secret `sk_` key must never be committed to a public repo, so each visitor pastes their own free `sk_` key.
+* **AI helper (anything else, including word problems):** connect an AI you already have under *AI settings*: **Google Gemini** or **Groq** (free keys), OpenRouter (free models), OpenAI, Anthropic Claude, Mistral, Pollinations, or any OpenAI-compatible address such as a local Ollama / LM Studio server. Keys are stored only in your browser and calls go straight from your browser to the provider. The model's answer is validated by the calculator's own parser, repaired automatically if a row is invalid, and any row that still can't be read is skipped. Costs nothing and needs no download or server.
+* No shared key is shipped: a key committed to a public repo could be copied by anyone, so each visitor uses their own.
 
 **Graph anything**
 
@@ -185,7 +185,7 @@ Graphical-Calculator/
 │       ├── geometry.js      #   geometry mode: constructions, transformations, conics, measurements
 │       ├── scientific.js    #   scientific + four-function calculator overlays
 │       ├── matrix.js        #   matrix calculator (pure linear algebra + UI)
-│       ├── ask.js           #   ✨ Ask: rule engine, Pollinations provider, reply validation, verified facts
+│       ├── ask.js           #   ✨ Ask: rule engine, multi-provider AI client, reply validation, verified facts
 │       └── app.js           #   UI, evaluation pipeline, sliders, tables, folders, regression
 ├── desktop/                 # 🖥️ Python/PySide6 edition
 │   ├── main.py
