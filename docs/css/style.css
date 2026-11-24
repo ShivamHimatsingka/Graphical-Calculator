@@ -294,3 +294,9 @@ body.app-geo #btnFit, body.app-geo #btnSquare { display: none; }
 .mat-hist { border-top: 1px solid var(--line); padding-top: 6px; font-size: 13px; color: var(--muted); }
 .mh { display: flex; gap: 12px; align-items: center; padding: 3px 0; }
 .mh .mt { cursor: pointer; color: var(--text); font-family: "Cambria Math", serif; }
+
+/* calculator switcher shown when the sidebar is hidden (geometry mode) */
+#modeFab { position: absolute; left: 10px; top: 10px; z-index: 8; }
+#modeFab[hidden] { display: none; }
+#modeFab .ib.float { position: static; }
+#modeFab .menu { top: 44px; left: 0; }

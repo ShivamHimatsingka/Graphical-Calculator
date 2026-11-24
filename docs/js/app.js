@@ -1317,7 +1317,7 @@
   }
 
   /* ================= popovers & menus ================= */
-  function closePopovers() { $('#pop').hidden = true; $('#gset').hidden = true; $('#mainMenu').hidden = true; $('#addMenu').hidden = true; }
+  function closePopovers() { $('#modeMenu').hidden = true; $('#pop').hidden = true; $('#gset').hidden = true; $('#mainMenu').hidden = true; $('#addMenu').hidden = true; }
   function place(pop, anchor) {
     pop.hidden = false;
     const a = anchor.getBoundingClientRect(), w = pop.offsetWidth, h = pop.offsetHeight;
@@ -1794,12 +1794,13 @@
   /* ================= calculator modes ================= */
   function buildGeoBar() {
     const bar = $('#geobar');
-    bar.innerHTML = GEO_TOOLS.map((t) => `<button class="gt" data-tool="${t.id}" title="${t.label}: ${t.hint}"><span class="gi">${t.icon}</span><span class="gl">${t.label}</span></button>`).join('')
+    bar.innerHTML = '<button class="gt" data-act="back" title="Back to the graphing calculator"><span class="gi">⟵</span><span class="gl">Graphing</span></button><span class="gsep"></span>' + GEO_TOOLS.map((t) => `<button class="gt" data-tool="${t.id}" title="${t.label}: ${t.hint}"><span class="gi">${t.icon}</span><span class="gl">${t.label}</span></button>`).join('')
       + '<span class="gsep"></span><button class="gt" data-act="undo" title="Undo"><span class="gi">↶</span><span class="gl">Undo</span></button><button class="gt" data-act="clear" title="Clear all"><span class="gi">🗑</span><span class="gl">Clear</span></button><button class="gt" data-act="grid" title="Toggle grid"><span class="gi">▦</span><span class="gl">Grid</span></button><span id="geoParam" hidden><label id="geoParamLbl"></label> <input type="number" id="geoParamIn" step="any" aria-label="Transformation parameter"></span><div id="geohint"></div>';
     $('#geoParamIn').oninput = () => { const v = parseFloat($('#geoParamIn').value); if (Number.isFinite(v) && (geo.tool === 'rotate' || geo.tool === 'dilate')) geo.param[geo.tool] = v; };
     bar.onclick = (e) => {
       const b = e.target.closest('button'); if (!b) return;
       if (b.dataset.tool) geo.setTool(b.dataset.tool);
+      else if (b.dataset.act === 'back') setApp('graph');
       else if (b.dataset.act === 'undo') geo.undo();
       else if (b.dataset.act === 'clear') { if (!geo.objects.length || confirm('Remove all geometry objects?')) geo.clear(); }
       else if (b.dataset.act === 'grid') { state.settings.grid = !state.settings.grid; state.settings.minor = state.settings.grid; applySettings(); saveSoon(); }
@@ -1810,6 +1811,12 @@
     const h = $('#geohint'); if (h) h.textContent = status || '';
     const def = GEO_TOOLS.find((t) => t.id === tool), box = $('#geoParam');
     if (box) { box.hidden = !(def && def.param); if (def && def.param) { $('#geoParamLbl').textContent = def.param.label; if (document.activeElement !== $('#geoParamIn')) $('#geoParamIn').value = geo.param[tool]; } }
+  }
+  function buildModeFab() {
+    const menu = $('#modeMenu');
+    menu.innerHTML = '<div class="lbl">Calculator</div><button data-app="graph">Graphing calculator</button><button data-app="geometry">Geometry</button><button data-app="scientific">Scientific calculator</button><button data-app="basic">Four-function calculator</button><button data-app="matrix">Matrix calculator</button>';
+    $('#btnModes').onclick = (e) => { e.stopPropagation(); const wasHidden = menu.hidden; closePopovers(); menu.hidden = !wasHidden; };
+    menu.onclick = (e) => { const b = e.target.closest('button[data-app]'); if (!b) return; menu.hidden = true; setApp(b.dataset.app); };
   }
   function setApp(name) {
     const S = state.settings;
@@ -1822,7 +1829,7 @@
       S.app = 'geometry'; body.classList.add('app-geo');
       if (S.mode === '3d') setMode('2d');
       graph.cb.onPointer = (t, x, y, e) => geo.pointer(t, x, y, e);
-      $('#geobar').hidden = false; $('#curvebar').hidden = true; $('#surfbar').hidden = true;
+      $('#geobar').hidden = false; $('#curvebar').hidden = true; $('#surfbar').hidden = true; $('#modeFab').hidden = false;
       geo.setTool('move');
       graph.setPlots([geo.plot]);
       applySettings();
@@ -1830,7 +1837,7 @@
     } else {
       S.app = 'graph'; body.classList.remove('app-geo');
       graph.cb.onPointer = null; graph.over.style.cursor = '';
-      $('#geobar').hidden = true;
+      $('#geobar').hidden = true; $('#modeFab').hidden = true; $('#modeMenu').hidden = true;
       applySettings();
       evaluate();
       setTimeout(() => { graph.resize(); graph.requestDraw(false); }, 30);
@@ -1879,7 +1886,7 @@
     else graph.resetView();
     applySettings();
     setMode(state.settings.mode === '3d' ? '3d' : '2d');
-    buildMainMenu(); buildKeypad(); buildGeoBar();
+    buildMainMenu(); buildKeypad(); buildGeoBar(); buildModeFab();
     if (state.settings.app === 'geometry') { state.settings.app = 'graph'; setApp('geometry'); }
     renderList();
     evaluate();
@@ -1953,7 +1960,7 @@
     };
     // dismiss popovers
     document.addEventListener('pointerdown', (e) => {
-      if (e.target.closest('.popover, .menu, #btnAdd, #btnMenu, #btnSettings, .gear')) return;
+      if (e.target.closest('.popover, .menu, #btnAdd, #btnMenu, #btnModes, #btnSettings, .gear')) return;
       closePopovers();
     });
     document.addEventListener('keydown', (e) => {
