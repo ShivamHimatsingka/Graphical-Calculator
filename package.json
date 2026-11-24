@@ -6,6 +6,6 @@
   "license": "MIT",
   "scripts": {
     "start": "python3 -m http.server 8000 --directory docs",
-    "test": "node tests/engine.test.js && node tests/latex.test.js && node tests/geometry.test.js && node tests/graph3d.test.js && node tests/matrix.test.js"
+    "test": "node tests/engine.test.js && node tests/latex.test.js && node tests/geometry.test.js && node tests/graph3d.test.js && node tests/matrix.test.js && node tests/ask.test.js"
   }
 }

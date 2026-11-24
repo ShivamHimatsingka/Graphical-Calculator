@@ -338,13 +338,13 @@
     const fresh3 = [...ids3].some((id) => !prev3Ids.has(id));
     const firstRun = !seen3;
     prev3Ids = ids3; seen3 = true;
-    if (!firstRun && fresh3 && !p2.some((q) => !q.hidden) && state.settings.mode !== '3d') { setMode('3d'); return; }
+    if (!firstRun && !suspendAuto && fresh3 && !p2.some((q) => !q.hidden) && state.settings.mode !== '3d') { setMode('3d'); return; }
     updateAllRows();
     graph.requestDraw(false); graph3.requestDraw(false);
   }
 
   let plots3Base = [];
-  let prev3Ids = new Set(), seen3 = false;
+  let prev3Ids = new Set(), seen3 = false, suspendAuto = false;
   const plane = { on: false, a: 0, b: 0, id: null, pt: null, info: null };
   const isTangentable = (q) => !q.hidden && !q.helper && (q.kind === 'surf' || q.kind === 'psurf' || (q.kind === 'isurf' && !q.alpha));
   const unit = (v) => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
@@ -1812,6 +1812,84 @@
     m.hidden = false;
   }
 
+  /* ================= Ask (question -> editable rows) ================= */
+  const stripMd = (t) => String(t || '').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').replace(/\n+/g, ' ').trim();
+  function snapshotAll() {
+    const r = graph.range();
+    return { items: JSON.stringify(state.items.map((i) => (i.type === 'image' ? Object.assign({}, i, { src: '' }) : i))), colorIdx: state.colorIdx, tableCount: state.tableCount || 0, mode: state.settings.mode, range: [r.xmin, r.xmax, r.ymin, r.ymax] };
+  }
+  function restoreAll(snap) {
+    state.items = JSON.parse(snap.items); state.items.forEach((i) => { if (i.type === 'image' && !i.src) i.src = imageData.get(i.id) || ''; });
+    state.colorIdx = snap.colorIdx; state.tableCount = snap.tableCount; playing.clear();
+    renderList(); suspendAuto = true; try { evaluate(); } finally { suspendAuto = false; }
+    if (state.settings.mode !== snap.mode) setMode(snap.mode);
+    graph.setRange(...snap.range); commitSoon(); saveSoon();
+  }
+  const askApi = {
+    toast, pretty,
+    relayout: () => setTimeout(() => { graph.resize(); }, 40),
+    currentRows: () => state.items.filter((i) => i.type === 'expr' && i.text).map((i) => i.text),
+    range: () => { const r = graph.range(); return r && Number.isFinite(r.xmin) ? { lo: r.xmin, hi: r.xmax } : null; },
+    setRange: (w) => graph.setRange(w.xmin, w.xmax, w.ymin, w.ymax),
+    fit: () => { if (state.settings.mode !== '3d') fitView(); },
+    // dry run: which of these rows cannot be used?
+    check(texts) {
+      const snap = state.items.slice(); const temps = texts.map((t) => newItem('expr', { text: t }));
+      suspendAuto = true;
+      try {
+        state.items.push(...temps); evaluate();
+        return temps.map((it) => ({ text: it.text, err: (recs.get(it.id) || {}).err })).filter((e) => e.err);
+      } finally { state.items = snap; evaluate(); suspendAuto = false; }
+    },
+    apply(plan, opts) {
+      const snapshot = snapshotAll();
+      const isDefaultDemo = state.items.length <= 3 && state.items.map((i) => i.text).join('|').replace(/\|+$/, '') === 'a=1|y=a sin(x)';
+      if ((opts && opts.fresh) || isDefaultDemo) { state.items = []; playing.clear(); }
+      const folder = newItem('folder', { text: plan.title || 'Ask' });
+      const items = [folder];
+      const note = stripMd(plan.explanation).slice(0, 420);
+      if (note) { const n = newItem('note', { text: note }); n.parent = folder.id; items.push(n); }
+      const rowItems = plan.rows.map((r) => { const it = newItem('expr', { text: r.text }); it.parent = folder.id; return it; });
+      items.push(...rowItems); state.items.push(...items);
+      renderList(); evaluate();
+      // parameters used but never defined become sliders automatically
+      const missing = new Set();
+      rowItems.forEach((it) => { const rec = recs.get(it.id); if (rec && !rec.err && rec.missing) rec.missing.forEach((m) => { if (/^[A-Za-z\u0370-\u03ff](_\w+)?$/.test(m) && !RESERVED.has(m)) missing.add(m); }); });
+      if (missing.size) {
+        const at = state.items.indexOf(rowItems[0]);
+        const sl = [...missing].map((m) => { const s0 = newItem('expr', { text: `${m}=1`, slider: { min: -10, max: 10, step: 0.01 } }); s0.parent = folder.id; return s0; });
+        state.items.splice(at, 0, ...sl); renderList(); evaluate();
+      }
+      const dropped = [];
+      for (const it of rowItems) { const rec = recs.get(it.id); if (rec && rec.err) { dropped.push({ text: it.text, err: rec.err }); state.items.splice(state.items.indexOf(it), 1); } }
+      if (dropped.length) { renderList(); evaluate(); }
+      // show the right view: all-3D answers open the 3D view, 2D answers bring you back to 2D
+      const kept = rowItems.filter((it) => state.items.includes(it)).map((it) => (recs.get(it.id) || {}).kind);
+      const is3 = (k) => ['surf', 'psurf', 'isurf', 'curve3', 'pt3'].includes(k);
+      if (kept.length && kept.every(is3) && state.settings.mode !== '3d') setMode('3d');
+      else if (kept.length && !kept.some(is3) && state.settings.mode === '3d') setMode('2d');
+      commitSoon(); saveSoon();
+      return { snapshot, ids: rowItems.filter((it) => state.items.includes(it)).map((it) => it.id), folderId: folder.id, added: rowItems.length - dropped.length, dropped };
+    },
+    rollback(snap) { restoreAll(snap); },
+    fxPlots(ids) {
+      return graph.plots.filter((p) => p.kind === 'fx' && ids.includes(p.id) && typeof p.f === 'function').map((p) => {
+        const it = state.items.find((i) => i.id === p.id);
+        return { label: it ? it.text.replace(/\s+/g, '') : 'curve', f: (x) => { const y = p.f(x); return p.cond && !p.cond(x, y) ? NaN : y; } };
+      });
+    },
+    addPoints(points, folderId) {
+      const last = state.items.filter((i) => i.parent === folderId).pop();
+      let at = last ? state.items.indexOf(last) + 1 : state.items.length;
+      const kinds = { int: 'Intersection', max: 'Maximum', min: 'Minimum', zero: 'Zero' };
+      points.forEach((pt) => {
+        const it = newItem('expr', { text: `(${parseFloat(pt.x.toPrecision(7))},${parseFloat(pt.y.toPrecision(7))})`, showLabel: true, label: '', dragMode: 'none', pointStyle: 'open' });
+        it.parent = folderId; state.items.splice(at++, 0, it);
+      });
+      renderList(); evaluate();
+    },
+  };
+
   /* ================= calculator modes ================= */
   function buildGeoBar() {
     const bar = $('#geobar');
@@ -1902,6 +1980,7 @@
     sci = new Sci($('#sci'), ME); sci.onClose = () => { ME.R.deg = !!state.settings.deg; };
     sci4 = new Sci($('#sci4'), ME, { basic: true, storeKey: 'graphical-calculator-basic' }); sci4.onClose = () => { ME.R.deg = !!state.settings.deg; };
     mat = new Mat($('#mat'), evalNumberText, (v) => ME.fmt(v, 8));
+    Ask.init(askApi);
     graph.resize();
     if (state.view && state.view.length === 4 && state.view.every(Number.isFinite)) graph.setRange(state.view[0], state.view[1], state.view[2], state.view[3]);
     else graph.resetView();
@@ -2004,7 +2083,7 @@
     setupDnD();
     window.addEventListener('resize', () => graph.resize());
     if (innerWidth < 720) $('#btnKeypad').textContent = '⌨';
-    window.__gc = { state: () => state, recs, graph, graph3, geo: () => geo, plane, evaluate, rows, setText: (i, t) => { const it = state.items[i]; it.text = t; const r = rows.get(it.id); r.ed.set(t); evaluate(); } };
+    window.__gc = { askApi, state: () => state, recs, graph, graph3, geo: () => geo, plane, evaluate, rows, setText: (i, t) => { const it = state.items[i]; it.text = t; const r = rows.get(it.id); r.ed.set(t); evaluate(); } };
   }
 
   async function boot() {
@@ -2013,7 +2092,7 @@
       window.__mlOK = !!(window.mlReady && await Promise.race([window.mlReady, timeout]));
     } catch (e) { window.__mlOK = false; }
     if (window.__mlOK) configureMathLive();
-    if (typeof Graph === 'undefined' || typeof Graph3D === 'undefined' || typeof Geo === 'undefined' || typeof Sci === 'undefined' || typeof Mat === 'undefined' || typeof LX === 'undefined') {
+    if (typeof Graph === 'undefined' || typeof Graph3D === 'undefined' || typeof Geo === 'undefined' || typeof Sci === 'undefined' || typeof Mat === 'undefined' || typeof Ask === 'undefined' || typeof LX === 'undefined') {
       document.body.insertAdjacentHTML('afterbegin', '<div style="position:fixed;inset:0;z-index:999;display:flex;align-items:center;justify-content:center;background:#fff;color:#222;font:16px sans-serif;text-align:center;padding:24px">Some files failed to load (network problem?).<br>Please <a href="" onclick="location.reload();return false">reload the page</a>.</div>');
       return;
     }

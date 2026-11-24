@@ -6,7 +6,7 @@
 <title>Graphical Calculator</title>
 <meta name="description" content="A Desmos-style graphing calculator that runs entirely in your browser.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232d70b3'/%3E%3Cpath d='M4 24 C10 24 10 8 16 8 S22 24 28 24' stroke='white' stroke-width='3' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="css/style.css?v=20261124b">
+<link rel="stylesheet" href="css/style.css?v=20261124c">
 </head>
 <body>
 <div id="app">
@@ -24,6 +24,7 @@
       </div>
       <button id="btnUndo" class="ib" title="Undo (Ctrl/⌘+Z)" aria-label="Undo"></button>
       <button id="btnRedo" class="ib" title="Redo (Ctrl/⌘+Shift+Z)" aria-label="Redo"></button>
+      <button id="btnAsk" class="ib txt askbtn" title="Ask a question and get it graphed">✨ Ask</button>
       <div class="grow"></div>
       <div class="menuwrap">
         <button id="btnMenu" class="ib" title="Menu" aria-label="Menu"></button>
@@ -31,6 +32,18 @@
       </div>
       <button id="btnCollapse" class="ib" title="Hide expression list" aria-label="Hide list"></button>
     </header>
+    <section id="ask" hidden aria-label="Ask">
+      <div class="ask-head"><b>✨ Ask</b><span class="grow"></span><button id="askSetBtn" class="ghost">AI settings</button><button id="askClear" class="ghost">Clear</button><button id="askClose" class="ib" aria-label="Close Ask">✕</button></div>
+      <div id="askSettings" hidden>
+        <p class="amuted">The built-in solver runs entirely in your browser. For anything else, the <b>AI helper</b> uses a free <a href="https://enter.pollinations.ai" target="_blank" rel="noopener">Pollinations</a> key. Your key and questions go only to Pollinations, never to us.</p>
+        <div class="ask-keyrow"><input id="askKeyIn" type="password" placeholder="Paste your free Pollinations key (pk_… or sk_…)" autocomplete="off" spellcheck="false"><button id="askKeySave" class="chip">Save</button><button id="askKeyClear" class="chip">Remove</button></div>
+        <div id="askKeyState" class="amuted"></div>
+        <label class="ask-model">Model <select id="askModel"><option value="openai">Default (openai)</option></select></label>
+      </div>
+      <div id="askLog" aria-live="polite"><div class="ab bot"><p><b>Ask anything you want graphed</b> — an equation, a question, or a word problem. The equations appear in editable boxes and on the graph, with a full explanation.</p><div class="ask-chips"><button class="ask-chip chip" data-q="graph y = x^2 - 4x + 3">y = x² − 4x + 3</button><button class="ask-chip chip" data-q="where do y = 2x + 1 and y = -x + 7 meet?">Where do two lines meet?</button><button class="ask-chip chip" data-q="a ball is thrown up at 20 m/s from a height of 2 m">Ball thrown up</button><button class="ask-chip chip" data-q="a plan costs a $15 fixed fee plus $4 per hour">Cost per hour</button><button class="ask-chip chip" data-q="tangent to y = x^2 at x = 3">Tangent line</button></div></div></div>
+      <label class="ask-fresh"><input type="checkbox" id="askFresh"> Start a fresh graph for each question</label>
+      <div class="ask-form"><textarea id="askIn" rows="2" placeholder="Ask a question or paste a word problem…" aria-label="Your question"></textarea><button id="askSend" class="askgo">Graph it</button></div>
+    </section>
     <div id="list" role="list"></div>
     <div id="keypad" hidden></div>
     <footer class="bottom">
@@ -92,13 +105,14 @@ window.mlReady = new Promise(function (resolve) {
   document.head.appendChild(s);
 });
 </script>
-<script src="js/mathengine.js?v=20261124b"></script>
-<script src="js/latex.js?v=20261124b"></script>
-<script src="js/graph.js?v=20261124b"></script>
-<script src="js/graph3d.js?v=20261124b"></script>
-<script src="js/geometry.js?v=20261124b"></script>
-<script src="js/scientific.js?v=20261124b"></script>
-<script src="js/matrix.js?v=20261124b"></script>
-<script src="js/app.js?v=20261124b"></script>
+<script src="js/mathengine.js?v=20261124c"></script>
+<script src="js/latex.js?v=20261124c"></script>
+<script src="js/graph.js?v=20261124c"></script>
+<script src="js/graph3d.js?v=20261124c"></script>
+<script src="js/geometry.js?v=20261124c"></script>
+<script src="js/scientific.js?v=20261124c"></script>
+<script src="js/matrix.js?v=20261124c"></script>
+<script src="js/ask.js?v=20261124c"></script>
+<script src="js/app.js?v=20261124c"></script>
 </body>
 </html>
