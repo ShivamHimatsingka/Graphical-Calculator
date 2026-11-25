@@ -4,6 +4,7 @@ import SwiftUI
 /// always has exactly the features of the website.
 struct CalculatorCommands: Commands {
     private let web = WebController.shared
+    @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
@@ -13,6 +14,9 @@ struct CalculatorCommands: Commands {
             Button("Save Graph…") { web.menu("save") }.keyboardShortcut("s")
             Button("Export Image…") { web.menu("png") }.keyboardShortcut("e", modifiers: [.command, .shift])
             Button("Copy Share Link") { web.menu("link") }
+        }
+        CommandGroup(after: .appInfo) {
+            Button("Offline AI Models…") { openWindow(id: "model") }
         }
         CommandGroup(replacing: .printItem) {
             Button("Print…") { web.printPage() }.keyboardShortcut("p")

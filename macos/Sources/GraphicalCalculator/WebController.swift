@@ -23,6 +23,10 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
       return { ok: r.status >= 200 && r.status < 300, status: r.status, text: async () => r.body, json: async () => JSON.parse(r.body) };
     };
     window.print = () => window.webkit.messageHandlers.print.postMessage(null);
+    window.__nativeModel = {
+      status: () => window.webkit.messageHandlers.model.postMessage({ a: 'status' }),
+      manage: () => window.webkit.messageHandlers.model.postMessage({ a: 'manage' })
+    };
     """
 
     override init() {
@@ -34,6 +38,7 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
         webView = WKWebView(frame: .zero, configuration: cfg)
         super.init()
         cfg.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "fetch")
+        cfg.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "model")
         cfg.userContentController.add(self, name: "print")
         webView.navigationDelegate = self
         webView.uiDelegate = self
@@ -41,7 +46,13 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
         webView.setValue(false, forKey: "drawsBackground")
         if #available(macOS 13.3, *) { webView.isInspectable = true }
         webView.load(URLRequest(url: URL(string: "gcalc://app/index.html")!))
+        Task { @MainActor in
+            ModelStore.shared.onChange = { [weak self] in self?.run("window.dispatchEvent(new Event('gc-model'))") }
+        }
     }
+
+    /// Set by the SwiftUI layer so the web page can open the model window.
+    var openModelWindow: (() -> Void)?
 
     // MARK: driving the web app
 
@@ -68,6 +79,14 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
     }
 
     func userContentController(_ c: WKUserContentController, didReceive message: WKScriptMessage, replyHandler: @escaping (Any?, String?) -> Void) {
+        if message.name == "model" {
+            let action = (message.body as? [String: Any])?["a"] as? String
+            Task { @MainActor in
+                if action == "manage" { self.openModelWindow?(); replyHandler(["ok": true], nil) }
+                else { replyHandler(ModelStore.shared.statusJSON(), nil) }
+            }
+            return
+        }
         guard message.name == "fetch", let d = message.body as? [String: Any], let s = d["url"] as? String, let url = URL(string: s), let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http" else {
             replyHandler(["error": "Bad request"], nil); return
         }
@@ -75,6 +94,23 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
         req.httpMethod = (d["method"] as? String)?.uppercased() == "GET" ? "GET" : "POST"
         for (k, v) in (d["headers"] as? [String: Any]) ?? [:] { req.setValue("\(v)", forHTTPHeaderField: k) }
         if let b = d["body"] as? String { req.httpBody = Data(b.utf8) }
+
+        // The on-device model: start the bundled engine on demand and forward to it.
+        if url.host == "local.model" {
+            Task {
+                do {
+                    let path = await MainActor.run { ModelStore.shared.activePath }
+                    let port = try await LlamaServer.shared.ensureRunning(modelPath: path)
+                    req.url = URL(string: "http://127.0.0.1:\(port)\(url.path)")
+                    req.timeoutInterval = 300
+                    let (data, resp) = try await self.session.data(for: req)
+                    replyHandler(["status": (resp as? HTTPURLResponse)?.statusCode ?? 0, "body": String(data: data, encoding: .utf8) ?? ""], nil)
+                } catch let e as LlamaServer.ServerError {
+                    replyHandler(["status": 503, "body": e.errorDescription ?? "Offline AI is unavailable."], nil)
+                } catch { replyHandler(["error": error.localizedDescription], nil) }
+            }
+            return
+        }
         session.dataTask(with: req) { data, resp, err in
             if let err = err { replyHandler(["error": err.localizedDescription], nil); return }
             let status = (resp as? HTTPURLResponse)?.statusCode ?? 0

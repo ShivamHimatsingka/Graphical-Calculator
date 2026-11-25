@@ -41,7 +41,7 @@ Explanation: friendly, step by step, numbered steps, short paragraphs, at most 2
   /* ---------------- reply parsing ---------------- */
   Ask.parseReply = (text) => {
     if (!text) return null;
-    let s = String(text).trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+    let s = String(text).replace(/<think>[\s\S]*?<\/think>/gi, '').trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
     const a = s.indexOf('{'), b = s.lastIndexOf('}');
     if (a < 0 || b <= a) return null;
     let obj; try { obj = JSON.parse(s.slice(a, b + 1)); } catch (e) { return null; }
@@ -56,7 +56,21 @@ Explanation: friendly, step by step, numbered steps, short paragraphs, at most 2
     if (obj.window && ['xmin', 'xmax', 'ymin', 'ymax'].every((k) => Number.isFinite(+obj.window[k])) && +obj.window.xmax > +obj.window.xmin && +obj.window.ymax > +obj.window.ymin) {
       win = { xmin: +obj.window.xmin, xmax: +obj.window.xmax, ymin: +obj.window.ymin, ymax: +obj.window.ymax };
     }
-    return { title: String(obj.title || 'Ask').slice(0, 60), explanation: String(obj.explanation || '').slice(0, 4000), rows, window: win };
+    return { title: String(obj.title || 'Ask').slice(0, 60), explanation: Ask.cleanExplanation(obj.explanation), rows, window: win };
+  };
+
+  // Rows must be mathematics. Prose such as "x = 0 to 50" would be read as 0*t*o*50 and spawn junk sliders.
+  Ask.isProse = (t) => /(^|[^a-z])(to|and|or|where|for|the|is|are|at|of|when|then|with|from|between|through|per)([^a-z]|$)/i.test(String(t).replace(/\{[^}]*\}/g, (m) => m.replace(/[a-z]+/gi, (w) => (/^(and|or)$/i.test(w) ? 'x' : w))));
+  Ask.proseErrors = (rows) => rows.filter((r) => Ask.isProse(r.text)).map((r) => ({ text: r.text, err: 'contains words; a row must contain only mathematics (use <= and >= for ranges, e.g. y=x^2{0<=x<=50})' }));
+
+  // Small models often double-escape newlines and write LaTeX; turn both into what the renderer understands.
+  Ask.cleanExplanation = (text) => {
+    let t = String(text || '');
+    // A literal backslash-n (not a real newline) that is not the start of a LaTeX command like \neq or \nu.
+    t = t.replace(/\\n(?!(?:eq|u|ot|e|i|otin|abla|cong|mid|parallel|leq|geq|less|gtr|leftarrow|rightarrow|ewline)\b)/g, '\n').replace(/\\t(?![a-z])/g, ' ');
+    const tex = (m) => { let r = m.trim(); if (global.LX) { try { r = global.LX.latexToText(r); } catch (e) { /* keep */ } } return '`' + r.replace(/`/g, '') + '`'; };
+    t = t.replace(/\\\(([\s\S]+?)\\\)/g, (_, m) => tex(m)).replace(/\\\[([\s\S]+?)\\\]/g, (_, m) => tex(m)).replace(/\$\$([\s\S]+?)\$\$/g, (_, m) => tex(m)).replace(/(^|[^\\\w])\$([^$\n]{1,80}?)\$(?!\w)/g, (_, a, m) => a + tex(m));
+    return t.slice(0, 4000);
   };
 
   /* ---------------- verified facts (computed by the calculator) ---------------- */
@@ -81,19 +95,19 @@ Explanation: friendly, step by step, numbered steps, short paragraphs, at most 2
     for (const q of S) {
       const { xs, ys } = q.s;
       const zs = roots(q.f, xs, ys, 1).slice(0, 4);
-      if (zs.length) { lines.push(`**${q.label}** crosses the x-axis at x = ${zs.map(fmtN).join(', ')}.`); zs.forEach((z) => points.push({ x: z, y: 0, kind: 'zero' })); }
-      const y0 = q.f(0); if (ok(y0) && lo <= 0 && hi >= 0) lines.push(`**${q.label}** crosses the y-axis at y = ${fmtN(y0)}.`);
+      if (zs.length) { lines.push(`\`${q.label}\` crosses the x-axis at x = ${zs.map(fmtN).join(', ')}.`); zs.forEach((z) => points.push({ x: z, y: 0, kind: 'zero' })); }
+      const y0 = q.f(0); if (ok(y0) && lo <= 0 && hi >= 0) lines.push(`\`${q.label}\` crosses the y-axis at y = ${fmtN(y0)}.`);
       const ext = [];
       for (let i = 1; i < N; i++) { const a = ys[i - 1], b = ys[i], c = ys[i + 1]; if ([a, b, c].every(Number.isFinite) && (b - a) * (c - b) < 0 && Math.abs(b) < 1e6) { let l = xs[i - 1], r = xs[i + 1]; const max = b > a; for (let k = 0; k < 80; k++) { const m1 = l + (r - l) / 3, m2 = r - (r - l) / 3; if (max ? q.f(m1) < q.f(m2) : q.f(m1) > q.f(m2)) l = m1; else r = m2; } const xm = (l + r) / 2; ext.push({ x: xm, y: q.f(xm), max }); } }
-      ext.slice(0, 3).forEach((e) => { lines.push(`**${q.label}** has a ${e.max ? 'maximum' : 'minimum'} at (${fmtN(e.x)}, ${fmtN(e.y)}).`); points.push({ x: e.x, y: e.y, kind: e.max ? 'max' : 'min' }); });
+      ext.slice(0, 3).forEach((e) => { lines.push(`\`${q.label}\` has a ${e.max ? 'maximum' : 'minimum'} at (${fmtN(e.x)}, ${fmtN(e.y)}).`); points.push({ x: e.x, y: e.y, kind: e.max ? 'max' : 'min' }); });
     }
     for (let i = 0; i < S.length; i++) for (let j = i + 1; j < S.length; j++) {
       const A = S[i], B = S[j], h = (x) => A.f(x) - B.f(x);
       const ys = A.s.ys.map((v, k) => (Number.isFinite(v) && Number.isFinite(B.s.ys[k]) ? v - B.s.ys[k] : NaN));
       const fin = ys.filter(Number.isFinite); if (fin.length && fin.filter((d) => Math.abs(d) < 1e-9).length > fin.length * 0.5) continue; // same curve
       const rs = roots(h, A.s.xs, ys, 1).slice(0, 4);
-      if (rs.length) { lines.push(`**${A.label}** and **${B.label}** meet at ${rs.map((r) => `(${fmtN(r)}, ${fmtN(A.f(r))})`).join(' and ')}.`); rs.forEach((r) => points.push({ x: r, y: A.f(r), kind: 'int' })); }
-      else if (fxs.length === 2) lines.push(`**${A.label}** and **${B.label}** do not cross in this range.`);
+      if (rs.length) { lines.push(`\`${A.label}\` and \`${B.label}\` meet at ${rs.map((r) => `(${fmtN(r)}, ${fmtN(A.f(r))})`).join(' and ')}.`); rs.forEach((r) => points.push({ x: r, y: A.f(r), kind: 'int' })); }
+      else if (fxs.length === 2) lines.push(`\`${A.label}\` and \`${B.label}\` do not cross in this range.`);
     }
     const order = { int: 0, max: 1, min: 1, zero: 2 };
     const seen = new Set();
@@ -195,9 +209,12 @@ Explanation: friendly, step by step, numbered steps, short paragraphs, at most 2
     anthropic: { label: 'Anthropic Claude', kind: 'anthropic', endpoint: 'https://api.anthropic.com/v1/messages', models: ['claude-haiku-5-5', 'claude-sonnet-5-5'], link: 'https://console.anthropic.com/settings/keys', hint: 'sk-ant-…' },
     mistral: { label: 'Mistral', kind: 'openai', endpoint: 'https://api.mistral.ai/v1/chat/completions', models: ['mistral-small-latest', 'mistral-large-latest'], link: 'https://console.mistral.ai/api-keys', hint: 'API key' },
     pollinations: { label: 'Pollinations', kind: 'openai', endpoint: 'https://gen.pollinations.ai/v1/chat/completions', models: ['openai'], link: 'https://enter.pollinations.ai/keys', hint: 'sk_…' },
+    local: { label: 'On-device model (offline, Mac app)', kind: 'openai', endpoint: 'https://local.model/v1/chat/completions', models: ['local'], nativeOnly: true, local: true, link: '', hint: '' },
     custom: { label: 'Custom / local (Ollama, LM Studio, …)', kind: 'openai', endpoint: '', models: [], custom: true, link: 'https://ollama.com', hint: 'API key (optional)' }
   };
-  Ask.getProviderId = () => { const id = store.get(LS + 'provider'); return Ask.providers[id] ? id : 'gemini'; };
+  Ask.native = { ready: false, state: 'none', name: '', progress: 0 };
+  const isNative = () => !!global.__native && !!global.__nativeModel;
+  Ask.getProviderId = () => { const id = store.get(LS + 'provider'); if (Ask.providers[id] && (!Ask.providers[id].nativeOnly || isNative())) return id; return isNative() ? 'local' : 'gemini'; };
   Ask.setProviderId = (id) => store.set(LS + 'provider', Ask.providers[id] ? id : '');
   Ask.getProvider = () => Ask.providers[Ask.getProviderId()];
   Ask.getKey = () => store.get(LS + 'key-' + Ask.getProviderId()) || (Ask.getProviderId() === 'pollinations' ? Ask.config.publishableKey : '') || '';
@@ -207,11 +224,12 @@ Explanation: friendly, step by step, numbered steps, short paragraphs, at most 2
   Ask.getEndpoint = () => { const p = Ask.getProvider(); return p.custom ? store.get(LS + 'endpoint') : p.endpoint; };
   Ask.setEndpoint = (u) => store.set(LS + 'endpoint', (u || '').trim());
   // true when a question could be sent to an AI right now
-  Ask.hasAI = () => { const p = Ask.getProvider(); return p.custom ? !!Ask.getEndpoint() && !!Ask.getModel() : !!Ask.getKey(); };
+  Ask.hasAI = () => { const p = Ask.getProvider(); if (p.local) return isNative() && Ask.native.ready; return p.custom ? !!Ask.getEndpoint() && !!Ask.getModel() : !!Ask.getKey(); };
   Ask.friendlyError = (e) => {
     if (e && e.name === 'AbortError') return 'Stopped.';
     const s = e && e.status; let name = 'AI';
     try { name = Ask.getProvider().label.replace(/ \(.*\)$/, ''); } catch (err) { /* ignore */ }
+    if (Ask.providers[Ask.getProviderId()].local && (s === 503 || e.network)) return (s === 503 && e.message) ? e.message + ' Open AI settings → Choose offline model.' : 'The offline AI engine did not respond. Open AI settings → Choose offline model.';
     if (s === 401 || s === 403 && /key|auth|permission/i.test((e && e.message) || '')) return `${name} did not accept the key. Open AI settings and check it (and that it belongs to ${name}).`;
     if (s === 402 || s === 403) return `${name} says this key has no credit or access right now. Wait a while or try another provider in AI settings.`;
     if (s === 404) return `${name} does not know that model. Pick another model in AI settings.`;
@@ -227,7 +245,10 @@ Explanation: friendly, step by step, numbered steps, short paragraphs, at most 2
     const doFetch = opts.fetch || global.__nativeFetch || fetch;
     const send = async (headers, body) => {
       let res;
-      try { res = await doFetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: opts.signal }); }
+      try {
+        const p = doFetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: opts.signal });
+        res = await (opts.signal ? Promise.race([p, new Promise((_, rej) => { const f = () => { const e = new Error('aborted'); e.name = 'AbortError'; rej(e); }; if (opts.signal.aborted) f(); else opts.signal.addEventListener('abort', f, { once: true }); })]) : p);
+      }
       catch (e) { if (e && e.name === 'AbortError') throw e; const er = new AskError(0, String(e && e.message)); er.network = true; throw er; }
       if (!res.ok) { const t = await res.text().catch(() => ''); throw new AskError(res.status, t.slice(0, 300)); }
       return res.json();
@@ -240,6 +261,7 @@ Explanation: friendly, step by step, numbered steps, short paragraphs, at most 2
     }
     const headers = { 'Content-Type': 'application/json' }; if (key) headers.Authorization = 'Bearer ' + key;
     const base = { model, messages, temperature: 0.2 };
+    if (p.local) { base.max_tokens = 1800; base.chat_template_kwargs = { enable_thinking: false }; }
     const go = async (withFormat) => {
       const data = await send(headers, withFormat ? Object.assign({ response_format: { type: 'json_object' } }, base) : base);
       return data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
@@ -276,12 +298,18 @@ Explanation: friendly, step by step, numbered steps, short paragraphs, at most 2
       const p = Ask.getProvider(), id = Ask.getProviderId(), k = Ask.getKey();
       $('#askProv').value = id; $('#askKeyIn').value = ''; $('#askKeyIn').placeholder = `Paste your API key (${p.hint})`;
       $('#askEndRow').hidden = !p.custom; $('#askEndpoint').value = Ask.getEndpoint();
-      $('#askProvLink').innerHTML = p.custom ? 'Runs against any OpenAI-compatible address, e.g. a local Ollama or LM Studio server.' : `Get a key at <a href="${esc(p.link)}" target="_blank" rel="noopener">${esc(p.link.replace(/^https:\/\//, ''))}</a>${p.free ? ' — free tier available' : ''}.`;
+      $('#askKeyRow').hidden = !!p.local; $('#askKeyState').hidden = !!p.local; $('#askModelRow').hidden = !!p.local; $('#askLocalRow').hidden = !p.local;
+      if (p.local) { const n = Ask.native; $('#askLocalState').textContent = n.ready ? `Ready: ${n.name}. Runs on this Mac, no internet or key needed.` : n.state === 'downloading' ? `Downloading… ${Math.round((n.progress || 0) * 100)}%` : n.state === 'verifying' ? 'Checking the downloaded file…' : n.state === 'damaged' ? 'The installed model is damaged. Open Choose offline model to reinstall it.' : `Not installed yet. Install the ${(n.sizeGB || 2.1).toFixed(1)} GB model, or reuse one already on your Mac.`; }
+      $('#askProvLink').hidden = !!p.local; $('#askProvLink').innerHTML = p.custom ? 'Runs against any OpenAI-compatible address, e.g. a local Ollama or LM Studio server.' : `Get a key at <a href="${esc(p.link)}" target="_blank" rel="noopener">${esc(p.link.replace(/^https:\/\//, ''))}</a>${p.free ? ' — free tier available' : ''}.`;
       $('#askKeyState').textContent = k ? `Key saved in this browser (${k.slice(0, 4)}…).` : (p.custom ? 'Key is optional for local servers.' : 'No key yet — the built-in solver still works.');
       $('#askModels').innerHTML = p.models.map((m) => `<option value="${esc(m)}">`).join(''); $('#askModel').value = Ask.getModel();
       $('#askSetBtn').classList.toggle('on', Ask.hasAI());
     };
-    $('#askProv').innerHTML = Object.keys(Ask.providers).map((id) => `<option value="${id}">${esc(Ask.providers[id].label)}</option>`).join('');
+    $('#askManage').onclick = () => { if (isNative()) global.__nativeModel.manage(); };
+    const refreshNative = () => { if (!isNative()) return; global.__nativeModel.status().then((st) => { Ask.native = Object.assign({ ready: false, state: 'none' }, st); fillProviders(); syncSettings(); }).catch(() => { /* ignore */ }); };
+    global.addEventListener('gc-model', refreshNative);
+    const fillProviders = () => { const sel = $('#askProv'); sel.innerHTML = Object.keys(Ask.providers).filter((id) => !Ask.providers[id].nativeOnly || isNative()).map((id) => `<option value="${id}">${esc(Ask.providers[id].label)}</option>`).join(''); sel.value = Ask.getProviderId(); };
+    fillProviders(); refreshNative();
     syncSettings();
     $('#btnAsk').onclick = () => { panel.hidden = !panel.hidden; $('#btnAsk').classList.toggle('on', !panel.hidden); if (!panel.hidden) { api.relayout(); setTimeout(() => input.focus(), 30); } else api.relayout(); };
     $('#askClose').onclick = () => { panel.hidden = true; $('#btnAsk').classList.remove('on'); api.relayout(); };
@@ -307,6 +335,7 @@ Explanation: friendly, step by step, numbered steps, short paragraphs, at most 2
       let factsHtml = '';
       const facts = Ask.facts(api.fxPlots(res.ids), api.range ? api.range() : null);
       if (facts.points.length) api.addPoints(facts.points, res.folderId);
+      if (!plan.window && facts.points.length) api.fit(); // include the labelled points (e.g. a vertex) in the view
       if (facts.lines.length) factsHtml = `<div class="afacts"><b>Verified results</b> <span class="amuted">(computed by the calculator)</span>${Ask.render(facts.lines.map((l) => '- ' + l).join('\n'), api.pretty)}</div>`;
       const dropped = res.dropped.length ? `<div class="awarn">Skipped ${res.dropped.length} row${res.dropped.length > 1 ? 's' : ''} the calculator could not read: ${res.dropped.map((d) => `<code>${esc(d.text)}</code>`).join(', ')}</div>` : '';
       const d = bubble('bot', `<div class="asrc">${plan.source === 'rules' ? 'Built-in solver' : 'AI helper'} · added ${addedRows} row${addedRows === 1 ? '' : 's'} in a folder “${esc(plan.title)}” — edit any box to change the graph</div>${Ask.render(plan.explanation || '', api.pretty)}${factsHtml}${dropped}<div class="aact"><button class="chip" data-undo>Undo</button></div>${extra || ''}`);
@@ -317,35 +346,40 @@ Explanation: friendly, step by step, numbered steps, short paragraphs, at most 2
     async function send() {
       const q = input.value.trim(); if (!q || busy) return;
       input.value = ''; bubble('me', esc(q)); setBusy(true); ctrl = new AbortController();
+      let status = null, tick = null;
       try {
         const rule = Ask.rules(q, global.ME);
         if (rule) { present(rule); return; }
         if (!Ask.hasAI()) {
-          bubble('bot', `<p>I can draw many standard requests with no setup, but this one needs an AI.</p><p><b>Connect one you already have (1 minute):</b> open <b>AI settings</b> above, pick a provider — <b>Google Gemini</b> and <b>Groq</b> have free keys; OpenAI, Anthropic, Mistral, OpenRouter, or a local Ollama/LM Studio server also work — and paste your key. It stays in your browser only.</p><p class="amuted">Meanwhile try: “graph y = x^2 − 4x + 3”, “where do y = 2x + 1 and y = −x + 7 meet?”, “circle of radius 3 centred at (1, 2)”, or “a ball is thrown up at 20 m/s”.</p>`);
+          if (isNative()) { const d = bubble('bot', `<p>I can draw many standard requests with no setup, but this one needs an AI.</p><p><b>Install the offline AI model</b> (one download, runs on this Mac with no key), or pick a cloud provider in <b>AI settings</b>.</p><div class="aact"><button class="chip" data-manage>Set up offline AI…</button></div>`); d.querySelector('[data-manage]').onclick = () => global.__nativeModel.manage(); }
+          else bubble('bot', `<p>I can draw many standard requests with no setup, but this one needs an AI.</p><p><b>Connect one you already have (1 minute):</b> open <b>AI settings</b> above, pick a provider — <b>Google Gemini</b> and <b>Groq</b> have free keys; OpenAI, Anthropic, Mistral, OpenRouter, or a local Ollama/LM Studio server also work — and paste your key. It stays in your browser only.</p><p class="amuted">Meanwhile try: “graph y = x^2 − 4x + 3”, “where do y = 2x + 1 and y = −x + 7 meet?”, “circle of radius 3 centred at (1, 2)”, or “a ball is thrown up at 20 m/s”.</p>`);
           return;
         }
-        const status = bubble('bot', '<span class="amuted">Thinking…</span>');
+        status = bubble('bot', '<span class="amuted">Thinking…</span>');
+        const t0 = Date.now(); const label = () => (Ask.getProvider().local ? 'Thinking on this Mac' : 'Thinking') + ` · ${Math.round((Date.now() - t0) / 1000)}s`;
+        let phase = 'Thinking'; tick = setInterval(() => { if (status) status.innerHTML = `<span class="amuted">${phase === 'Thinking' ? label() : phase}…</span>`; }, 1000);
         const messages = [{ role: 'system', content: Ask.SYSTEM_PROMPT }, ...history.slice(-4), { role: 'user', content: Ask.userPrompt(q, api.currentRows()) }];
         history.push({ role: 'user', content: q });
         let plan = null, lastReply = '';
         for (let attempt = 0; attempt < 3; attempt++) {
-          status.innerHTML = `<span class="amuted">${attempt ? 'Checking and fixing the equations…' : 'Thinking…'}</span>`;
+          phase = attempt ? 'Checking and fixing the equations' : 'Thinking'; status.innerHTML = `<span class="amuted">${phase === 'Thinking' ? label() : phase + '…'}</span>`;
           lastReply = await Ask.callAI(messages, { signal: ctrl.signal });
           plan = Ask.parseReply(lastReply);
           if (!plan) { messages.push({ role: 'assistant', content: String(lastReply).slice(0, 1500) }, { role: 'user', content: 'That was not valid JSON. Reply with only the JSON object.' }); continue; }
           if (!plan.rows.length) break;
-          const bad = api.check(plan.rows.map((r) => r.text));
+          const bad = Ask.proseErrors(plan.rows).concat(api.check(plan.rows.map((r) => r.text)));
           if (!bad.length) break;
           if (attempt < 2) { messages.push({ role: 'assistant', content: String(lastReply).slice(0, 2500) }, { role: 'user', content: Ask.repairPrompt(bad) }); plan.__retry = true; continue; }
         }
-        status.remove();
+        clearInterval(tick); status.remove(); status = null;
+        if (plan) plan.rows = plan.rows.filter((r) => !Ask.isProse(r.text));
         if (!plan) { bubble('bot', '<p>I could not turn that into a graph. Try rephrasing it, or give an equation.</p>'); return; }
         plan.source = 'ai';
         if (!plan.rows.length) { bubble('bot', `<div class="asrc">AI helper</div>${Ask.render(plan.explanation || 'There is nothing to draw for this question.', api.pretty)}`); return; }
         present(plan);
       } catch (e) {
         bubble('bot', `<p class="awarn">${esc(Ask.friendlyError(e))}</p>`);
-      } finally { setBusy(false); ctrl = null; }
+      } finally { if (tick) clearInterval(tick); if (status) status.remove(); setBusy(false); ctrl = null; }
     }
     Ask._send = send;
   };

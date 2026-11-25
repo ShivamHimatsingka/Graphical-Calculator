@@ -80,8 +80,28 @@ f = Ask.facts([fx((x) => x ** 3, 'f'), fx((x) => x ** 3, 'y=f(x)')]); ok(f.point
   let e1; try { await Ask.callAI([{ role: 'user', content: 'U' }], { fetch: async () => { throw new TypeError('Failed to fetch'); } }); } catch (e) { e1 = e; }
   ok(e1 && e1.network && /Could not reach/.test(Ask.friendlyError(e1)), 'network error is friendly');
   Ask.setProviderId('gemini'); ok(/Google Gemini/.test(Ask.friendlyError({ status: 401 })) && /model/i.test(Ask.friendlyError({ status: 404 })), 'errors name the provider');
+  // on-device provider (Mac app only)
+  const st2 = {}; sb.localStorage = { getItem: (k) => (k in st2 ? st2[k] : null), setItem: (k, v) => { st2[k] = String(v); }, removeItem: (k) => { delete st2[k]; } };
+  ok(Ask.getProviderId() === 'gemini', 'default provider is gemini outside the Mac app');
+  sb.__native = 'macos'; sb.__nativeModel = {}; Ask.native = { ready: true, state: 'ready', name: 'Qwen' };
+  ok(Ask.getProviderId() === 'local' && Ask.hasAI(), 'Mac app defaults to the on-device model once installed');
+  Ask.native = { ready: false, state: 'none' }; ok(Ask.getProviderId() === 'local' && !Ask.hasAI(), 'Mac app still defaults to the on-device model (never silently to a cloud one) when it is not installed');
+  Ask.setProviderId('local'); ok(Ask.getProviderId() === 'local' && !Ask.hasAI(), 'chosen local provider without model is not usable');
+  ok(/Choose offline model/.test(Ask.friendlyError({ status: 503, message: 'The offline AI model is not installed.' })), 'local 503 explains how to install');
+  let cap2 = {}; Ask.native = { ready: true }; sb.__nativeFetch = async (u, o) => { cap2.url = u; cap2.body = JSON.parse(o.body); return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: '{}' } }] }), text: async () => '' }; };
+  await Ask.callAI([{ role: 'user', content: 'U' }]); ok(/local\.model/.test(cap2.url) && cap2.body.max_tokens > 0 && cap2.body.model === 'local' && cap2.body.chat_template_kwargs.enable_thinking === false, 'local call goes through the native bridge with thinking off');
+  delete sb.__native; delete sb.__nativeModel; delete sb.__nativeFetch;
   console.log(`ask provider tests done: ${pass} passed`); if (fails.length) { console.error(fails.join('\n')); process.exit(1); }
 })();
+
+r = Ask.parseReply('<think>let me think {not json}</think>\n{"title":"T","explanation":"e","rows":[{"text":"y=x"}]}'); ok(r && r.rows.length === 1 && r.title === 'T', 'reply parsing ignores <think> blocks');
+f = Ask.facts([fx((x) => 2 * x + 1, 'y=a*x+1'), fx((x) => -x + 7, 'y=-x+7')]); ok(f.lines.every((l) => !/\*\*/.test(l)), 'labels containing * cannot break bold markup');
+
+{ const c = Ask.cleanExplanation('1. Let \\( x \\) be width.\\n2. Area is $A = x(50-x)$ and x \\neq 0.\\nThe end');
+  ok(c.indexOf('\n2. Area') > 0 && c.indexOf('\nThe end') > 0, 'escaped newlines become real newlines'); ok(!/\\\(/.test(c) && /`x`/.test(c), 'LaTeX delimiters become inline code'); ok(/\\neq|≠/.test(c), 'LaTeX commands starting with n are not broken'); }
+
+ok(Ask.isProse('x = 0 to 50') && Ask.isProse('x=0to50') && Ask.isProse('y = the area') && !Ask.isProse('y=x^2{0<=x<=50}') && !Ask.isProse('y = sin(x) + 2') && !Ask.isProse('(25,625)') && !Ask.isProse('y=sqrt(x)'), 'prose rows are detected, maths is not');
+ok(Ask.proseErrors([{ text: 'x = 0 to 50' }, { text: 'y=x' }]).length === 1, 'prose rows are reported for repair');
 
 if (fails.length) { console.error(fails.join('\n')); process.exit(1); }
 console.log(`ask tests: ${pass} passed`);

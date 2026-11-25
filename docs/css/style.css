@@ -340,7 +340,11 @@ body.app-geo #btnFit, body.app-geo #btnSquare { display: none; }
 .ask-form textarea:focus { border-color: var(--accent); }
 .askgo { border: 0; background: #6042a6; color: #fff; border-radius: 10px; padding: 8px 14px; font-weight: 600; white-space: nowrap; }
 .askgo.stop { background: var(--err); }
-#askSettings { padding: 4px 12px 8px; font-size: 13px; border-bottom: 1px solid var(--line); }
+#askSettings { padding: 4px 12px 8px; font-size: 13px; border-bottom: 1px solid var(--line); overflow-y: auto; max-height: 220px; flex: 0 0 auto; }
+#ask [hidden] { display: none !important; }
+#askLocalRow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 6px 0 2px; }
+#askLocalState { flex: 1 1 100%; }
+#askLog { min-height: 96px; }
 #askSettings[hidden] { display: none; }
 .ask-keyrow { display: flex; gap: 4px; margin: 6px 0 2px; }
 .ask-keyrow input { flex: 1; min-width: 0; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); }

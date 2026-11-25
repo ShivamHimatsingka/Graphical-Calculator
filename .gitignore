@@ -17,3 +17,4 @@ node_modules/
 # Swift / macOS app
 macos/.build/
 macos/dist/
+macos/.cache/

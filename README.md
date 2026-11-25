@@ -160,6 +160,21 @@ A native SwiftUI app that hosts the full web calculator in a WebKit view, so the
 * Native **menu bar** with shortcuts: New / Open / Save graph (⌘N ⌘O ⌘S), Export image (⇧⌘E), Print (⌘P), **Ask (⌘K)**, Fit (⇧⌘F), Reset view (⌘0), 2D/3D (⌘3), switch calculator (⌥⌘1–5).
 * Native open / save panels, print dialog, alerts, Dock icon, light and dark mode.
 * AI providers are called from the app itself (no browser CORS limits), including local Ollama / LM Studio.
+* **Offline AI models:** the app bundles the open-source [llama.cpp](https://github.com/ggml-org/llama.cpp) engine and installs the model for you from inside the app (one download, no key, works without internet). **Offline AI Models…** (app menu, or *AI settings → Choose offline model…*) shows one model per size, marks the one that suits your Mac's memory, and installs into `~/Library/Application Support/Graphical Calculator/Models`:
+
+  | Tier | Model | Size | Needs | Measured (24 word problems) |
+  | --- | --- | --- | --- | --- |
+  | Compact | Qwen3-1.7B | 1.1 GB | 4 GB+ | 17/24, about 2 s per answer |
+  | **Balanced** (default) | Qwen3-4B-Instruct-2507 | 2.1 GB | 8 GB+ | **22/24** |
+  | Precise | same model, Q6 | 3.3 GB | 12 GB+ | not separately measured |
+  | Pro | Qwen3-30B-A3B-Instruct-2507, Q3 | 14.7 GB | 24 GB+ | not measured (published scores are higher) |
+  | Max | same model, Q4 | 18.6 GB | 32 GB+ | not measured |
+
+  All are Apache-2.0. The picks come from [`tools/bench`](tools/bench/RESULTS.md): the newest "thinking" models score very high in their own papers but do worse than plain Instruct models once thinking is off (it is far too slow for a calculator), so the catalog uses the Instruct family. Re-run the benchmark on any model with `tools/bench/bench.js`.
+  * Every card always has **Download / Resume**, **Reinstall** (replaces a corrupt copy), **Verify files** (SHA-256), **Remove**, **Show in Finder** and a link to the model page.
+  * Every download is size- and SHA-256-checked before use; interrupted downloads resume; a damaged install is detected.
+  * If you already have a usable chat model (LM Studio, Ollama, llama.cpp / Hugging Face cache, Jan, GPT4All, `~/models`), the app finds it and offers to use it instead of downloading.
+  * The engine only runs while you ask something and frees its memory after 15 idle minutes. Small models are weaker than cloud ones on hard word problems and sometimes misread a problem; the calculator checks the equations it draws, not whether the problem was understood.
 
 Requires macOS 13+ and Xcode / the Swift toolchain to build:
 
@@ -190,10 +205,12 @@ Graphical-Calculator/
 │       ├── matrix.js        #   matrix calculator (pure linear algebra + UI)
 │       ├── ask.js           #   ✨ Ask: rule engine, multi-provider AI client, reply validation, verified facts
 │       └── app.js           #   UI, evaluation pipeline, sliders, tables, folders, regression
-├── macos/                   # 🖥️ Swift / SwiftUI Mac app (WebKit host, menus, build script)
+├── macos/                   # 🖥️ Swift / SwiftUI Mac app (WebKit host, menus, offline AI model manager, build script)
 │   ├── Package.swift
-│   ├── Sources/GraphicalCalculator/
+│   ├── Sources/GraphicalCalculator/   #   App, WebController, ModelStore, ModelCatalog, LlamaServer, ModelWindow
+│   ├── Tests/           #   `swift test` (model detection, hashing)
 │   └── scripts/         #   build_app.sh, make_icon.swift
+├── tools/bench/             # benchmark for local models (word problems, app JSON format)
 ├── tests/                   # engine, LaTeX converter, geometry, 3D-helper, matrix and Ask tests
 ├── assets/                  # README images
 ├── package.json             # `npm start` / `npm test` helpers

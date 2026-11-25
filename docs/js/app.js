@@ -1831,7 +1831,7 @@
     currentRows: () => state.items.filter((i) => i.type === 'expr' && i.text).map((i) => i.text),
     range: () => { const r = graph.range(); return r && Number.isFinite(r.xmin) ? { lo: r.xmin, hi: r.xmax } : null; },
     setRange: (w) => graph.setRange(w.xmin, w.xmax, w.ymin, w.ymax),
-    fit: () => { if (state.settings.mode !== '3d') fitView(); },
+    fit: () => { if (state.settings.mode === '3d') return; fitView(); const r = graph.range(); const dy = (r.ymax - r.ymin) * 0.1, dx = (r.xmax - r.xmin) * 0.04; graph.setRange(r.xmin - dx, r.xmax + dx, r.ymin - dy, r.ymax + dy); },
     // dry run: which of these rows cannot be used?
     check(texts) {
       const snap = state.items.slice(); const temps = texts.map((t) => newItem('expr', { text: t }));
@@ -1845,7 +1845,8 @@
       const snapshot = snapshotAll();
       const isDefaultDemo = state.items.length <= 3 && state.items.map((i) => i.text).join('|').replace(/\|+$/, '') === 'a=1|y=a sin(x)';
       if ((opts && opts.fresh) || isDefaultDemo) { state.items = []; playing.clear(); }
-      const folder = newItem('folder', { text: plan.title || 'Ask' });
+      else state.items = state.items.filter((i) => !(i.type === 'expr' && !(i.text || '').trim() && !i.parent)); // drop blank placeholder rows
+      const folder = newItem('folder', { text: String(plan.title || 'Ask').slice(0, 40) });
       const items = [folder];
       const note = stripMd(plan.explanation).slice(0, 420);
       if (note) { const n = newItem('note', { text: note }); n.parent = folder.id; items.push(n); }

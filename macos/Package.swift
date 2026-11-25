@@ -5,6 +5,7 @@ let package = Package(
     name: "GraphicalCalculator",
     platforms: [.macOS(.v13)],
     targets: [
-        .executableTarget(name: "GraphicalCalculator", path: "Sources/GraphicalCalculator")
+        .executableTarget(name: "GraphicalCalculator", path: "Sources/GraphicalCalculator"),
+        .testTarget(name: "GraphicalCalculatorTests", dependencies: ["GraphicalCalculator"], path: "Tests/GraphicalCalculatorTests")
     ]
 )
