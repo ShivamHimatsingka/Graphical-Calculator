@@ -13,3 +13,7 @@ node_modules/
 .idea/
 .vscode/
 *.swp
+
+# Swift / macOS app
+macos/.build/
+macos/dist/

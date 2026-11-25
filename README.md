@@ -1,6 +1,6 @@
 # 📈 Graphical Calculator
 
-> A Desmos-style graphing calculator — runs **in your browser** with zero installs, plus a native Python desktop edition.
+> A Desmos-style graphing calculator — runs **in your browser** with zero installs, plus a native **macOS app** (Swift / SwiftUI).
 
 <p align="center">
   <a href="https://shivamhimatsingka.github.io/Graphical-Calculator/"><b>▶ Open the live web app</b></a>
@@ -24,7 +24,7 @@ This repository contains two editions:
 | Edition | Where | Stack | Best for |
 | --- | --- | --- | --- |
 | 🌐 **Web** (recommended) | [`docs/`](docs/) · [live site](https://shivamhimatsingka.github.io/Graphical-Calculator/) | Plain HTML / CSS / JavaScript (live formula editor via MathLive from a CDN, optional) | Everything — full Desmos-style feature set, works on desktop, tablet and phone |
-| 🖥️ **Desktop** | [`desktop/`](desktop/) | Python, PySide6, PyQtGraph, NumPy, SymPy | The original native app (functions, sliders, points, tracing) |
+| 🖥️ **macOS app** | [`macos/`](macos/) | Swift, SwiftUI, WebKit (bundles the web app, works offline) | A native Mac experience: menu bar, shortcuts, file dialogs, Dock icon |
 
 ---
 
@@ -149,24 +149,27 @@ npm test                      # or: node tests/engine.test.js && node tests/late
 
 ---
 
-## 🖥️ Desktop edition (Python)
+## 🖥️ macOS app (Swift / SwiftUI)
 
 <p align="center">
-  <img src="assets/desktop-screenshot.png" width="760" alt="Desktop edition screenshot">
+  <img src="assets/macos-app.png" width="760" alt="macOS app screenshot">
 </p>
 
-Requires Python 3.10+ on macOS, Windows or Linux.
+A native SwiftUI app that hosts the full web calculator in a WebKit view, so the Mac app always has exactly the features of the website — and works offline (only the live formula editor loads from the internet; without a connection it falls back to a plain-text editor).
+
+* Native **menu bar** with shortcuts: New / Open / Save graph (⌘N ⌘O ⌘S), Export image (⇧⌘E), Print (⌘P), **Ask (⌘K)**, Fit (⇧⌘F), Reset view (⌘0), 2D/3D (⌘3), switch calculator (⌥⌘1–5).
+* Native open / save panels, print dialog, alerts, Dock icon, light and dark mode.
+* AI providers are called from the app itself (no browser CORS limits), including local Ollama / LM Studio.
+
+Requires macOS 13+ and Xcode / the Swift toolchain to build:
 
 ```bash
 git clone https://github.com/ShivamHimatsingka/Graphical-Calculator.git
 cd Graphical-Calculator
-pip install -r desktop/requirements.txt
-python desktop/main.py
+macos/scripts/build_app.sh --install   # builds a universal app and copies it to /Applications
 ```
 
-Supports lines, polynomials, trigonometry, logarithms, exponentials, interactive sliders with two-way sync, custom colours, user-defined points, curve tracking, zoom/pan, show/hide/delete, and debounced live updates.
-
-> The desktop edition has a smaller feature set than the web edition; new features land in the web app first.
+The build copies `docs/` into the app, so rebuild after changing the web app. The app is ad-hoc signed: on first launch right-click → Open (or allow it in System Settings → Privacy & Security).
 
 ---
 
@@ -187,9 +190,10 @@ Graphical-Calculator/
 │       ├── matrix.js        #   matrix calculator (pure linear algebra + UI)
 │       ├── ask.js           #   ✨ Ask: rule engine, multi-provider AI client, reply validation, verified facts
 │       └── app.js           #   UI, evaluation pipeline, sliders, tables, folders, regression
-├── desktop/                 # 🖥️ Python/PySide6 edition
-│   ├── main.py
-│   └── requirements.txt
+├── macos/                   # 🖥️ Swift / SwiftUI Mac app (WebKit host, menus, build script)
+│   ├── Package.swift
+│   ├── Sources/GraphicalCalculator/
+│   └── scripts/         #   build_app.sh, make_icon.swift
 ├── tests/                   # engine, LaTeX converter, geometry, 3D-helper, matrix and Ask tests
 ├── assets/                  # README images
 ├── package.json             # `npm start` / `npm test` helpers
@@ -246,7 +250,6 @@ Graphical-Calculator/
 
 * **Web app shows an old version after an update** — hard-refresh (⇧⌘R / Ctrl+F5); browsers cache the JavaScript.
 * **Row shows a red message** — hover/read it: it names the problem (unknown character, unmatched parenthesis, …).
-* **`ModuleNotFoundError: No module named 'PySide6'`** (desktop) — `pip install -r desktop/requirements.txt`.
 
 ---
 
@@ -258,7 +261,7 @@ Issues and pull requests are welcome.
 2. For the web app, edit files in `docs/` and run `npm test`.
 3. Open a pull request describing the change.
 
-When reporting a bug please include your OS/browser (or Python version), the exact expression, what you expected and what happened — a screenshot helps.
+When reporting a bug please include your OS/browser (or macOS version), the exact expression, what you expected and what happened — a screenshot helps.
 
 ---
 

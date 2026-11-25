@@ -224,7 +224,7 @@ Explanation: friendly, step by step, numbered steps, short paragraphs, at most 2
     opts = opts || {};
     const p = Ask.getProvider(), key = Ask.getKey(), url = Ask.getEndpoint(), model = opts.model || Ask.getModel();
     if (!Ask.hasAI()) throw new AskError(401, 'not configured');
-    const doFetch = opts.fetch || fetch;
+    const doFetch = opts.fetch || global.__nativeFetch || fetch;
     const send = async (headers, body) => {
       let res;
       try { res = await doFetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: opts.signal }); }
