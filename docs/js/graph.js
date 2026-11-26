@@ -114,14 +114,22 @@
       if (this.locked) return;
       const v = this.view;
       const wx = this.invX(px), wy = this.invY(py);
-      v.sx = clamp(v.sx * fx, 1e-9, 1e9);
-      v.sy = clamp(v.sy * fy, 1e-9, 1e9);
+      // Keep the visible span between 1e-7 and 1e5 units on each axis: further out the graph is just empty and
+      // takes dozens of clicks to get back from, which feels like being stuck.
+      v.sx = clamp(v.sx * fx, Math.max(this.w, 1) / 1e5, Math.max(this.w, 1) / 1e-7);
+      v.sy = clamp(v.sy * fy, Math.max(this.h, 1) / 1e5, Math.max(this.h, 1) / 1e-7);
+      const hitLimit = (fx < 1 && v.sx <= this.w / 1e5 * 1.0001) || (fx > 1 && v.sx >= this.w / 1e-7 * 0.9999);
+      if (hitLimit && this.cb.onLimit) this.cb.onLimit();
       v.x0 = wx - (px - this.w / 2) / v.sx;
       v.y0 = wy + (py - this.h / 2) / v.sy;
       this._viewChanged(true);
     }
     _viewChanged(fast) {
       this.autoFit = false;
+      // Every way of changing the view (zoom, axis drag, saved/loaded views) ends up inside sane limits.
+      const v = this.view, w = Math.max(this.w, 1), h = Math.max(this.h, 1);
+      if (![v.x0, v.y0, v.sx, v.sy].every(Number.isFinite)) this.view = { x0: 0, y0: 0, sx: w / 20, sy: w / 20 };
+      else { v.sx = clamp(v.sx, w / 1e5, w / 1e-7); v.sy = clamp(v.sy, h / 1e5, h / 1e-7); }
       if (this.cb.onView) this.cb.onView(this.range());
       this.requestDraw(fast);
     }

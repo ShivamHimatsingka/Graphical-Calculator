@@ -6,7 +6,7 @@
 <title>Graphical Calculator</title>
 <meta name="description" content="A Desmos-style graphing calculator that runs entirely in your browser.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232d70b3'/%3E%3Cpath d='M4 24 C10 24 10 8 16 8 S22 24 28 24' stroke='white' stroke-width='3' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="css/style.css?v=20261125c">
+<link rel="stylesheet" href="css/style.css?v=20261125e">
 </head>
 <body>
 <div id="app">
@@ -48,7 +48,7 @@
         <div id="askKeyState" class="amuted"></div>
         <div id="askLocalRow" hidden><div id="askLocalState" class="amuted"></div><button id="askManage" class="chip">Choose offline model…</button></div>
         <div class="ask-row" id="askModelRow"><label for="askModel">Model</label><input id="askModel" list="askModels" type="text" autocomplete="off" spellcheck="false"><datalist id="askModels"></datalist></div>
-        <label class="ask-fresh"><input type="checkbox" id="askFresh"> Start a fresh graph for each question</label>
+        <label class="ask-fresh"><input type="checkbox" id="askKeep"> Keep earlier answers on the graph</label>
         <div class="ask-foot"><span class="amuted">Your key stays in this browser. Questions go only to the AI you pick.</span><button id="askSetDone" class="chip">Done</button></div>
       </div>
       <div id="askLog" aria-live="polite"><div class="ask-intro"><div class="ask-intro-title">Ask anything you want graphed</div><div class="amuted">An equation, a question or a word problem. You get editable equations, the graph and an explanation.</div><div class="ask-chips"><button class="ask-chip chip" data-q="graph y = x^2 - 4x + 3">y = x² − 4x + 3</button><button class="ask-chip chip" data-q="where do y = 2x + 1 and y = -x + 7 meet?">Where do two lines meet?</button><button class="ask-chip chip" data-q="a ball is thrown up at 20 m/s from a height of 2 m">Ball thrown up</button><button class="ask-chip chip" data-q="a plan costs a $15 fixed fee plus $4 per hour">Cost per hour</button><button class="ask-chip chip" data-q="tangent to y = x^2 at x = 3">Tangent line</button></div></div></div>
@@ -115,14 +115,14 @@ window.mlReady = new Promise(function (resolve) {
   document.head.appendChild(s);
 });
 </script>
-<script src="js/mathengine.js?v=20261125c"></script>
-<script src="js/latex.js?v=20261125c"></script>
-<script src="js/graph.js?v=20261125c"></script>
-<script src="js/graph3d.js?v=20261125c"></script>
-<script src="js/geometry.js?v=20261125c"></script>
-<script src="js/scientific.js?v=20261125c"></script>
-<script src="js/matrix.js?v=20261125c"></script>
-<script src="js/ask.js?v=20261125c"></script>
-<script src="js/app.js?v=20261125c"></script>
+<script src="js/mathengine.js?v=20261125e"></script>
+<script src="js/latex.js?v=20261125e"></script>
+<script src="js/graph.js?v=20261125e"></script>
+<script src="js/graph3d.js?v=20261125e"></script>
+<script src="js/geometry.js?v=20261125e"></script>
+<script src="js/scientific.js?v=20261125e"></script>
+<script src="js/matrix.js?v=20261125e"></script>
+<script src="js/ask.js?v=20261125e"></script>
+<script src="js/app.js?v=20261125e"></script>
 </body>
 </html>

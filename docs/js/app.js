@@ -1894,13 +1894,22 @@
     apply(plan, opts) {
       const snapshot = snapshotAll();
       const isDefaultDemo = state.items.length <= 3 && state.items.map((i) => i.text).join('|').replace(/\|+$/, '') === 'a=1|y=a sin(x)';
-      if ((opts && opts.fresh) || isDefaultDemo) { state.items = []; playing.clear(); state.colorIdx = 0; }
-      else state.items = state.items.filter((i) => !(i.type === 'expr' && !(i.text || '').trim() && !i.parent)); // drop blank placeholder rows
-      const folder = newItem('folder', { text: String(plan.title || 'Ask').slice(0, 40) });
+      if (isDefaultDemo) { state.items = []; playing.clear(); state.colorIdx = 0; }
+      else {
+        // A new answer replaces the earlier answers (not the equations you typed yourself), unless you chose to keep them.
+        if (!(opts && opts.keep)) {
+          const old = new Set(state.items.filter((i) => i.ask && i.type === 'folder').map((i) => i.id));
+          const before = state.items.length;
+          state.items = state.items.filter((i) => !(i.ask || old.has(i.parent)));
+          if (state.items.length < before) playing.clear();
+        }
+        state.items = state.items.filter((i) => !(i.type === 'expr' && !(i.text || '').trim() && !i.parent)); // drop blank placeholder rows
+      }
+      const folder = newItem('folder', { text: String(plan.title || 'Ask').slice(0, 40), ask: true });
       const items = [folder];
       const note = clipNote(stripMd(plan.explanation), 1100);
-      if (note) { const n = newItem('note', { text: note }); n.parent = folder.id; items.push(n); }
-      const rowItems = plan.rows.map((r) => { const it = newItem('expr', { text: r.text }); it.parent = folder.id; return it; });
+      if (note) { const n = newItem('note', { text: note, ask: true }); n.parent = folder.id; items.push(n); }
+      const rowItems = plan.rows.map((r) => { const it = newItem('expr', { text: r.text, ask: true }); it.parent = folder.id; return it; });
       items.push(...rowItems); state.items.push(...items);
       renderList(); evaluate();
       // parameters used but never defined become sliders automatically
@@ -1908,7 +1917,7 @@
       rowItems.forEach((it) => { const rec = recs.get(it.id); if (rec && !rec.err && rec.missing) rec.missing.forEach((m) => { if (/^[A-Za-z\u0370-\u03ff](_\w+)?$/.test(m) && !RESERVED.has(m)) missing.add(m); }); });
       if (missing.size) {
         const at = state.items.indexOf(rowItems[0]);
-        const sl = [...missing].map((m) => { const s0 = newItem('expr', { text: `${m}=1`, slider: { min: -10, max: 10, step: 0.01 } }); s0.parent = folder.id; return s0; });
+        const sl = [...missing].map((m) => { const s0 = newItem('expr', { text: `${m}=1`, slider: { min: -10, max: 10, step: 0.01 }, ask: true }); s0.parent = folder.id; return s0; });
         state.items.splice(at, 0, ...sl); renderList(); evaluate();
       }
       const dropped = [];
@@ -1934,7 +1943,7 @@
       let at = last ? state.items.indexOf(last) + 1 : state.items.length;
       const kinds = { int: 'Intersection', max: 'Maximum', min: 'Minimum', zero: 'Zero' };
       points.filter((pt) => Math.abs(pt.x) < 1e7 && Math.abs(pt.y) < 1e7).forEach((pt) => {
-        const it = newItem('expr', Object.assign({ text: `(${parseFloat(pt.x.toPrecision(7))},${parseFloat(pt.y.toPrecision(7))})`, showLabel: true, label: '', dragMode: 'none', pointStyle: 'open' }, pt.color ? { color: pt.color } : {}));
+        const it = newItem('expr', Object.assign({ text: `(${parseFloat(pt.x.toPrecision(7))},${parseFloat(pt.y.toPrecision(7))})`, showLabel: true, label: '', dragMode: 'none', pointStyle: 'open', ask: true }, pt.color ? { color: pt.color } : {}));
         it.parent = folderId; state.items.splice(at++, 0, it);
       });
       renderList(); evaluate();
@@ -2008,6 +2017,7 @@
       tip: $('#tip'),
       callbacks: {
         onView: () => saveSoon(),
+        onLimit: () => toast('Zoom limit reached. Press the home button to reset the view.'),
         onCursor: (x, y, on) => {
           if (!on) { coords.textContent = ''; return; }
           const dec = clamp(Math.ceil(Math.log10(Math.max(graph.view.sx, graph.view.sy))) + 1, 0, 8);

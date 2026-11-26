@@ -353,8 +353,8 @@ Explanation: friendly, step by step, numbered steps, short paragraphs, at most 2
     $('#askEndpoint').onchange = (e) => { Ask.setEndpoint(e.target.value); syncSettings(); };
     $('#askKeyClear').onclick = () => { Ask.setKey(''); syncSettings(); api.toast('Key removed'); };
     $('#askModel').onchange = (e) => { Ask.setModel(e.target.value); syncSettings(); };
-    try { $('#askFresh').checked = localStorage.getItem('graphical-calculator-ask-fresh') === '1'; } catch (e) { /* ignore */ }
-    $('#askFresh').onchange = (e) => { try { localStorage.setItem('graphical-calculator-ask-fresh', e.target.checked ? '1' : '0'); } catch (err) { /* ignore */ } };
+    try { $('#askKeep').checked = localStorage.getItem('graphical-calculator-ask-keep') === '1'; } catch (e) { /* ignore */ }
+    $('#askKeep').onchange = (e) => { try { localStorage.setItem('graphical-calculator-ask-keep', e.target.checked ? '1' : '0'); } catch (err) { /* ignore */ } };
     log.addEventListener('click', (e) => { const c = e.target.closest('.ask-chip'); if (c) { input.value = c.dataset.q; send(); } });
     const autosize = () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 110) + 'px'; };
     input.addEventListener('input', autosize);
@@ -366,7 +366,7 @@ Explanation: friendly, step by step, numbered steps, short paragraphs, at most 2
     const setBusy = (b) => { busy = b; sendBtn.textContent = b ? 'Stop' : 'Graph it'; sendBtn.classList.toggle('stop', b); input.disabled = b; if (!b) input.focus(); };
 
     function present(plan, extra) {
-      const res = api.apply(plan, { fresh: $('#askFresh').checked });
+      const res = api.apply(plan, { keep: $('#askKeep').checked });
       const addedRows = res.added;
       let factsHtml = '';
       const fxs = api.fxPlots(res.ids);
