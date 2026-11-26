@@ -63,13 +63,22 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
     func app(_ key: String) { click("#mainMenu [data-app=\"\(key)\"]") }
     func add(_ kind: String) { click("#addMenu [data-add=\"\(kind)\"]") }
     func toggleList() { run("(function(){var a=document.querySelector('#btnCollapse'),b=document.querySelector('#btnExpand'); var t=(b&&!b.hidden)?b:a; if(t) t.click();})()") }
+    private var printDelegate: PrintDone?
     func printPage() {
-        let info = NSPrintInfo.shared
-        info.isHorizontallyCentered = true; info.isVerticallyCentered = true
-        info.orientation = .landscape
-        let op = webView.printOperation(with: info)
-        op.view?.frame = webView.bounds
-        if let w = webView.window { op.runModal(for: w, delegate: nil, didRun: nil, contextInfo: nil) } else { op.run() }
+        // Print on a white page: switch the web app to its light theme first, and back afterwards.
+        run("window.__printPrep && window.__printPrep()")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            let info = NSPrintInfo.shared
+            info.isHorizontallyCentered = true; info.isVerticallyCentered = true
+            info.orientation = .landscape
+            let op = self.webView.printOperation(with: info)
+            op.view?.frame = self.webView.bounds
+            let done = PrintDone { [weak self] in self?.run("window.__printDone && window.__printDone()"); self?.printDelegate = nil }
+            self.printDelegate = done
+            if let w = self.webView.window {
+                op.runModal(for: w, delegate: done, didRun: #selector(PrintDone.finished(_:success:contextInfo:)), contextInfo: nil)
+            } else { op.run(); done.callback() }
+        }
     }
 
     // MARK: JS → native messages
@@ -144,6 +153,12 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
     }
 
     func download(_ download: WKDownload, decideDestinationUsing response: URLResponse, suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
+        #if DEBUG
+        if let dir = ProcessInfo.processInfo.environment["GC_DOWNLOAD_DIR"] {   // automated tests: skip the panel
+            let url = URL(fileURLWithPath: dir).appendingPathComponent(suggestedFilename)
+            try? FileManager.default.removeItem(at: url); completionHandler(url); return
+        }
+        #endif
         DispatchQueue.main.async {
             let panel = NSSavePanel()
             panel.nameFieldStringValue = suggestedFilename
@@ -160,6 +175,9 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
     // MARK: file input, alerts
 
     func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
+        #if DEBUG
+        if let f = ProcessInfo.processInfo.environment["GC_OPEN_FILE"] { completionHandler([URL(fileURLWithPath: f)]); return }   // automated tests
+        #endif
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = parameters.allowsMultipleSelection
         panel.canChooseDirectories = false
@@ -186,4 +204,11 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
         let f = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24)); f.stringValue = defaultText ?? ""
         alert(prompt, buttons: ["OK", "Cancel"], field: f) { completionHandler($0 == .alertFirstButtonReturn ? f.stringValue : nil) }
     }
+}
+
+/// Receives "the print panel closed" so the page can switch back to its own theme.
+final class PrintDone: NSObject {
+    let callback: () -> Void
+    init(_ cb: @escaping () -> Void) { callback = cb }
+    @objc func finished(_ op: NSPrintOperation, success: Bool, contextInfo: UnsafeMutableRawPointer?) { callback() }
 }

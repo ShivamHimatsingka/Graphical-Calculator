@@ -128,6 +128,13 @@
     document.addEventListener('mousedown', (e) => { if (!(e.target.closest && e.target.closest(KEEP))) { const sel = window.getSelection(); if (sel && !sel.isCollapsed) sel.removeAllRanges(); } }, true);
   })();
 
+  // Printing always uses the light theme (a dark graph would print as a solid black page); the theme is restored afterwards.
+  let printTheme = null;
+  function printPrep() { if (printTheme === null) { printTheme = state.settings.theme; state.settings.theme = 'light'; applySettings(); } }
+  function printDone() { if (printTheme !== null) { state.settings.theme = printTheme; printTheme = null; applySettings(); } }
+  window.addEventListener('beforeprint', printPrep); window.addEventListener('afterprint', printDone);
+  window.__printPrep = printPrep; window.__printDone = printDone;
+
   /* ================= evaluation ================= */
   function fmtValue(v) {
     if (Array.isArray(v)) return '[' + v.slice(0, 12).map(fmtValue).join(', ') + (v.length > 12 ? `, … (${v.length} items)` : '') + ']';
@@ -1672,7 +1679,7 @@
         case 'new': if (confirm('Start a new graph? Unsaved work will be cleared.')) { state.items = [newItem('expr')]; playing.clear(); renderList(); evaluate(); graph.resetView(); commitSoon(); saveSoon(); } break;
         case 'open': $('#fileIn').click(); break;
         case 'save': {
-          const blob = new Blob([JSON.stringify({ app: 'graphical-calculator', version: 1, items: state.items, settings: state.settings, colorIdx: state.colorIdx, tableCount: state.tableCount || 0, nextId, geo: geo.toJSON() }, null, 2)], { type: 'application/json' });
+          const blob = new Blob([JSON.stringify({ app: 'graphical-calculator', version: 1, items: state.items, settings: state.settings, colorIdx: state.colorIdx, tableCount: state.tableCount || 0, nextId, geo: geo.toJSON(), view: (() => { const r = graph.range(); return [r.xmin, r.xmax, r.ymin, r.ymax]; })() }, null, 2)], { type: 'application/json' });
           download(blob, 'graph.json'); toast('Saved graph.json'); break;
         }
         case 'png': activeGraph().exportPNG((blob) => { download(blob, 'graph.png'); toast('Exported graph.png'); }); break;
@@ -2062,7 +2069,9 @@
           if (d.settings) Object.assign(state.settings, d.settings);
           if (d.geo) geo.load(d.geo);
           nextId = Math.max(1, ...state.items.map((i) => i.id + 1));
-          playing.clear(); applySettings(); renderList(); evaluate(); commitSoon(); saveSoon(); toast('Graph loaded');
+          playing.clear(); applySettings(); renderList(); evaluate();
+          if (Array.isArray(d.view) && d.view.length === 4 && d.view.every(Number.isFinite) && d.view[1] > d.view[0] && d.view[3] > d.view[2]) graph.setRange(d.view[0], d.view[1], d.view[2], d.view[3]); else graph.resetView();
+          commitSoon(); saveSoon(); toast('Graph loaded');
         } catch (err) { toast('Could not read that file'); }
       };
       rd.readAsText(f); e.target.value = '';
