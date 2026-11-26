@@ -320,34 +320,57 @@ body.app-geo #btnFit, body.app-geo #btnSquare { display: none; }
 /* Ask panel */
 .askbtn { width: auto; padding: 0 10px; color: #6042a6; }
 .askbtn.on { background: #6042a6; color: #fff; }
-#ask { border-bottom: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; max-height: 62%; min-height: 220px; }
-#ask[hidden] { display: none; }
-.ask-head { display: flex; align-items: center; gap: 4px; padding: 6px 8px 2px 12px; }
-#askLog { flex: 1; overflow-y: auto; padding: 6px 10px; display: flex; flex-direction: column; gap: 8px; overscroll-behavior: contain; }
-.ab { border-radius: 12px; padding: 8px 11px; font-size: 13.5px; line-height: 1.45; max-width: 100%; }
+#ask { position: relative; border-bottom: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; height: 52%; min-height: 250px; max-height: 70%; }
+#ask[hidden], #ask [hidden] { display: none !important; }
+.ask-head { display: flex; align-items: center; gap: 6px; padding: 8px 8px 6px 12px; flex: 0 0 auto; }
+.ask-title { font-size: 14px; }
+.ask-pill { display: inline-flex; align-items: center; gap: 6px; max-width: 62%; min-width: 0; padding: 3px 9px; border: 1px solid var(--line); border-radius: 999px; background: var(--bg); color: var(--text); font-size: 12px; cursor: pointer; }
+.ask-pill:hover, .ask-pill[aria-expanded="true"] { border-color: var(--accent); }
+.ask-pill #askPillText { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ask-dot { width: 7px; height: 7px; border-radius: 50%; background: #c98a00; flex: 0 0 auto; }
+.ask-pill.ready .ask-dot { background: #2e9b57; }
+.ask-caret { font-size: 10px; color: var(--muted); }
+.ask-ghost { border: 0; background: transparent; color: var(--muted); font-size: 12px; padding: 4px 6px; border-radius: 6px; cursor: pointer; }
+.ask-ghost:hover { background: var(--gutter); color: var(--text); }
+.ask-x { border: 0; background: transparent; color: var(--muted); width: 26px; height: 26px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.ask-x:hover { background: var(--gutter); color: var(--text); }
+
+#askLog { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 4px 12px 10px; display: flex; flex-direction: column; gap: 8px; overscroll-behavior: contain; }
+.ask-intro { margin: auto 0; padding: 6px 2px; }
+.ask-intro-title { font-weight: 600; font-size: 14px; margin-bottom: 2px; }
+.ask-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.ask-chips .chip { font-size: 12px; padding: 3px 9px; }
+.ab { border-radius: 12px; padding: 8px 11px; font-size: 13px; line-height: 1.45; max-width: 100%; }
 .ab.me { align-self: flex-end; background: var(--accent); color: #fff; max-width: 88%; }
 .ab.bot { background: var(--gutter); }
 .ab p { margin: 4px 0; } .ab ol, .ab ul { margin: 4px 0 4px 18px; padding: 0; }
 .ab code.am { font: 14px "Cambria Math", "Times New Roman", serif; background: color-mix(in srgb, var(--accent) 12%, transparent); padding: 0 4px; border-radius: 4px; }
-.asrc { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: 2px; }
-.afacts { margin-top: 6px; padding: 6px 8px; border-left: 3px solid #388c46; background: color-mix(in srgb, #388c46 10%, transparent); border-radius: 0 8px 8px 0; }
-.amuted { color: var(--muted); font-size: 12px; }
+.asrc { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+.afacts { margin-top: 8px; padding: 6px 8px; border-left: 3px solid #388c46; background: color-mix(in srgb, #388c46 10%, transparent); border-radius: 0 8px 8px 0; font-size: 12.5px; }
+.afacts ul { margin: 4px 0 0 16px; }
+.amuted { color: var(--muted); font-size: 12px; line-height: 1.4; }
 .awarn { color: var(--err); font-size: 13px; }
-.aact { margin-top: 6px; }
-.ask-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
-.ask-form { display: flex; gap: 6px; padding: 6px 10px 10px; align-items: flex-end; }
-.ask-form textarea { flex: 1; resize: none; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--text); font: 14px inherit; font-family: inherit; padding: 7px 9px; outline: 0; max-height: 120px; }
-.ask-form textarea:focus { border-color: var(--accent); }
-.askgo { border: 0; background: #6042a6; color: #fff; border-radius: 10px; padding: 8px 14px; font-weight: 600; white-space: nowrap; }
+.aact { margin-top: 8px; }
+
+.ask-form { display: flex; gap: 6px; align-items: flex-end; margin: 0 10px 10px; padding: 5px 5px 5px 10px; border: 1px solid var(--line); border-radius: 14px; background: var(--bg); flex: 0 0 auto; }
+.ask-form:focus-within { border-color: var(--accent); }
+.ask-form textarea { flex: 1; resize: none; border: 0; background: transparent; color: var(--text); font: 14px inherit; font-family: inherit; padding: 5px 0; outline: 0; max-height: 110px; line-height: 1.35; }
+.askgo { border: 0; background: #6042a6; color: #fff; border-radius: 10px; padding: 7px 12px; font-weight: 600; white-space: nowrap; font-size: 13px; cursor: pointer; }
 .askgo.stop { background: var(--err); }
-#askSettings { padding: 4px 12px 8px; font-size: 13px; border-bottom: 1px solid var(--line); overflow-y: auto; max-height: 220px; flex: 0 0 auto; }
-#ask [hidden] { display: none !important; }
-#askLocalRow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 6px 0 2px; }
+
+/* settings: an overlay under the header, so it never squeezes the conversation */
+#askSettings { position: absolute; z-index: 6; top: 40px; left: 8px; right: 8px; max-height: calc(100% - 52px); overflow-y: auto; padding: 10px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 28px rgba(0,0,0,.28); font-size: 13px; display: flex; flex-direction: column; gap: 8px; }
+.ask-row { display: flex; align-items: center; gap: 6px; }
+.ask-row label { width: 48px; flex: 0 0 auto; color: var(--muted); font-size: 12px; }
+.ask-row select, .ask-row input { flex: 1; min-width: 0; padding: 5px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); font-size: 13px; }
+#askLocalRow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 #askLocalState { flex: 1 1 100%; }
-#askLog { min-height: 96px; }
-#askSettings[hidden] { display: none; }
-.ask-keyrow { display: flex; gap: 4px; margin: 6px 0 2px; }
-.ask-keyrow input { flex: 1; min-width: 0; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); }
-.ask-model { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
-.ask-model select, .ask-model input { flex: 1; min-width: 0; padding: 4px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); }
-.ask-fresh { display: flex; align-items: center; gap: 6px; padding: 0 12px; font-size: 12px; color: var(--muted); }
+.ask-fresh { display: flex; align-items: center; gap: 8px; font-size: 13px; padding-top: 2px; }
+.ask-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
+
+/* Ask on phones: the conversation gets the whole sheet instead of sharing it with the expression list */
+@media (max-width: 720px) {
+  #side:has(#ask:not([hidden])) { height: 66vh; }
+  #side:has(#ask:not([hidden])) #list, #side:has(#ask:not([hidden])) .bottom, #side:has(#ask:not([hidden])) #keypad { display: none; }
+  #ask { height: auto; flex: 1 1 auto; min-height: 0; max-height: none; border-bottom: 0; }
+}

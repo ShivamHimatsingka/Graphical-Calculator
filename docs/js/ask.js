@@ -293,7 +293,9 @@ Explanation: friendly, step by step, numbered steps, short paragraphs, at most 2
     const panel = $('#ask'), log = $('#askLog'), input = $('#askIn'), sendBtn = $('#askSend'), setBox = $('#askSettings');
     let busy = false, ctrl = null; const history = [];
     const scroll = () => { log.scrollTop = log.scrollHeight; };
-    const bubble = (cls, html) => { const d = document.createElement('div'); d.className = 'ab ' + cls; d.innerHTML = html; log.appendChild(d); scroll(); return d; };
+    const introHTML = log.innerHTML;
+    const bubble = (cls, html) => { const i = log.querySelector('.ask-intro'); if (i) i.remove(); const d = document.createElement('div'); d.className = 'ab ' + cls; d.innerHTML = html; log.appendChild(d); scroll(); return d; };
+    const toggleSettings = (open) => { setBox.hidden = open === undefined ? !setBox.hidden : !open; $('#askSetBtn').setAttribute('aria-expanded', String(!setBox.hidden)); };
     const syncSettings = () => {
       const p = Ask.getProvider(), id = Ask.getProviderId(), k = Ask.getKey();
       $('#askProv').value = id; $('#askKeyIn').value = ''; $('#askKeyIn').placeholder = `Paste your API key (${p.hint})`;
@@ -303,7 +305,9 @@ Explanation: friendly, step by step, numbered steps, short paragraphs, at most 2
       $('#askProvLink').hidden = !!p.local; $('#askProvLink').innerHTML = p.custom ? 'Runs against any OpenAI-compatible address, e.g. a local Ollama or LM Studio server.' : `Get a key at <a href="${esc(p.link)}" target="_blank" rel="noopener">${esc(p.link.replace(/^https:\/\//, ''))}</a>${p.free ? ' — free tier available' : ''}.`;
       $('#askKeyState').textContent = k ? `Key saved in this browser (${k.slice(0, 4)}…).` : (p.custom ? 'Key is optional for local servers.' : 'No key yet — the built-in solver still works.');
       $('#askModels').innerHTML = p.models.map((m) => `<option value="${esc(m)}">`).join(''); $('#askModel').value = Ask.getModel();
-      $('#askSetBtn').classList.toggle('on', Ask.hasAI());
+      const ok = Ask.hasAI(), pill = $('#askSetBtn');
+      pill.classList.toggle('ready', ok);
+      $('#askPillText').textContent = !ok ? 'Set up AI' : p.local ? `On-device · ${String(Ask.native.name || 'model').replace(/[-_ ]?instruct(-\d+)?/i, '')}` : `${p.label.replace(/ \(.*\)$/, '')} · ${Ask.getModel() || ''}`.replace(/ · $/, '');
     };
     $('#askManage').onclick = () => { if (isNative()) global.__nativeModel.manage(); };
     const refreshNative = () => { if (!isNative()) return; global.__nativeModel.status().then((st) => { Ask.native = Object.assign({ ready: false, state: 'none' }, st); fillProviders(); syncSettings(); }).catch(() => { /* ignore */ }); };
@@ -313,7 +317,8 @@ Explanation: friendly, step by step, numbered steps, short paragraphs, at most 2
     syncSettings();
     $('#btnAsk').onclick = () => { panel.hidden = !panel.hidden; $('#btnAsk').classList.toggle('on', !panel.hidden); if (!panel.hidden) { api.relayout(); setTimeout(() => input.focus(), 30); } else api.relayout(); };
     $('#askClose').onclick = () => { panel.hidden = true; $('#btnAsk').classList.remove('on'); api.relayout(); };
-    $('#askSetBtn').onclick = () => { setBox.hidden = !setBox.hidden; };
+    $('#askSetBtn').onclick = () => toggleSettings();
+    $('#askSetDone').onclick = () => toggleSettings(false);
     $('#askProv').onchange = (e) => { Ask.setProviderId(e.target.value); syncSettings(); };
     $('#askKeySave').onclick = () => { const v = $('#askKeyIn').value.trim(); if (v) { Ask.setKey(v); api.toast('Key saved in this browser'); } if (Ask.getProvider().custom) Ask.setEndpoint($('#askEndpoint').value); syncSettings(); };
     $('#askEndpoint').onchange = (e) => { Ask.setEndpoint(e.target.value); syncSettings(); };
@@ -321,10 +326,13 @@ Explanation: friendly, step by step, numbered steps, short paragraphs, at most 2
     $('#askModel').onchange = (e) => { Ask.setModel(e.target.value); syncSettings(); };
     try { $('#askFresh').checked = localStorage.getItem('graphical-calculator-ask-fresh') === '1'; } catch (e) { /* ignore */ }
     $('#askFresh').onchange = (e) => { try { localStorage.setItem('graphical-calculator-ask-fresh', e.target.checked ? '1' : '0'); } catch (err) { /* ignore */ } };
-    document.querySelectorAll('.ask-chip').forEach((c) => { c.onclick = () => { input.value = c.dataset.q; send(); }; });
+    log.addEventListener('click', (e) => { const c = e.target.closest('.ask-chip'); if (c) { input.value = c.dataset.q; send(); } });
+    const autosize = () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 110) + 'px'; };
+    input.addEventListener('input', autosize);
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !setBox.hidden) toggleSettings(false); });
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
     sendBtn.onclick = () => { if (busy && ctrl) { ctrl.abort(); return; } send(); };
-    $('#askClear').onclick = () => { log.innerHTML = ''; history.length = 0; };
+    $('#askClear').onclick = () => { log.innerHTML = introHTML; history.length = 0; };
 
     const setBusy = (b) => { busy = b; sendBtn.textContent = b ? 'Stop' : 'Graph it'; sendBtn.classList.toggle('stop', b); input.disabled = b; if (!b) input.focus(); };
 
@@ -345,7 +353,7 @@ Explanation: friendly, step by step, numbered steps, short paragraphs, at most 2
 
     async function send() {
       const q = input.value.trim(); if (!q || busy) return;
-      input.value = ''; bubble('me', esc(q)); setBusy(true); ctrl = new AbortController();
+      input.value = ''; autosize(); toggleSettings(false); bubble('me', esc(q)); setBusy(true); ctrl = new AbortController();
       let status = null, tick = null;
       try {
         const rule = Ask.rules(q, global.ME);
