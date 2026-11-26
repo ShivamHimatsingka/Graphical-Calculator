@@ -48,9 +48,7 @@
   }
   function defaultState() {
     state = { items: [], settings: defaultSettings(), colorIdx: 0, view: null };
-    state.items.push(newItem('expr', { text: 'a=1', slider: { min: -5, max: 5, step: 0.01 } }));
-    state.items.push(newItem('expr', { text: 'y=a sin(x)' }));
-    state.items.push(newItem('expr', { text: '' }));
+    state.items.push(newItem('expr', { text: '' })); // always start on a blank graph
   }
 
   /* ================= pretty printing ================= */
@@ -1186,20 +1184,32 @@
   const animDir = new Map();
   function startAnim() {
     if (animOn) return; animOn = true; lastTs = performance.now();
+    let tickErrors = 0;
     const tick = (ts) => {
       if (!playing.size) { animOn = false; return; }
-      const dt = Math.min(0.1, (ts - lastTs) / 1000); lastTs = ts;
+      const dt = Math.min(0.1, Math.max(0, (ts - lastTs) / 1000)); lastTs = ts;
       for (const id of [...playing]) {
-        const rec = recs.get(id); if (!rec || !rec.isSlider) { playing.delete(id); continue; }
-        const sl = rec.item.slider, span = sl.max - sl.min;
-        const mode = sl.mode || 'loop'; let dir = animDir.get(id) || 1;
-        let v = V[rec.def.name] + dir * dt * span / (8 / (sl.speed || 1));
-        if (mode === 'bounce') { if (v > sl.max) { v = 2 * sl.max - v; dir = -1; } else if (v < sl.min) { v = 2 * sl.min - v; dir = 1; } }
-        else if (mode === 'once') { if (v >= sl.max) { v = sl.max; playing.delete(id); } }
-        else if (v > sl.max) v = sl.min + ((v - sl.min) % span);
-        animDir.set(id, dir);
-        setSliderValue(rec.item, Math.round(v * 1e5) / 1e5, true);
-        if (!playing.has(id)) syncSliderUI(rec);
+        try {
+          const rec = recs.get(id); if (!rec || !rec.isSlider) { playing.delete(id); continue; }
+          const sl = rec.item.slider, span = sl.max - sl.min;
+          if (!(span > 0) || !Number.isFinite(span)) { playing.delete(id); syncSliderUI(rec); toast('The slider range is not valid'); continue; }
+          const mode = sl.mode || 'loop'; let dir = animDir.get(id) || 1;
+          let v = V[rec.def.name] + dir * dt * span / (8 / (sl.speed || 1));
+          if (mode === 'bounce') { if (v > sl.max) { v = 2 * sl.max - v; dir = -1; } else if (v < sl.min) { v = 2 * sl.min - v; dir = 1; } }
+          else if (mode === 'once') { if (v >= sl.max) { v = sl.max; playing.delete(id); } }
+          else if (v > sl.max) v = sl.min + ((v - sl.min) % span);
+          if (!Number.isFinite(v)) v = sl.min;
+          v = Math.min(sl.max, Math.max(sl.min, v));
+          if (Math.abs(v) < 1e-6) v = 0;               // never write "1e-7"-style text into the equation
+          animDir.set(id, dir);
+          setSliderValue(rec.item, Math.round(v * 1e5) / 1e5, true);
+          if (!playing.has(id)) syncSliderUI(rec);
+          tickErrors = 0;
+        } catch (err) {
+          // One bad frame must never stop the animation for good.
+          console.error('slider animation', err);
+          if (++tickErrors > 20) { playing.clear(); tickErrors = 0; toast('The animation stopped: ' + (err && err.message)); }
+        }
       }
       requestAnimationFrame(tick);
     };
@@ -1359,7 +1369,16 @@
         const b = h.slice(3).replace(/-/g, '+').replace(/_/g, '/');
         const bin = atob(b); const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
         raw = new TextDecoder().decode(bytes);
-      } else raw = localStorage.getItem(STORE_KEY);
+      } else {
+        // The page always opens on a blank graph: earlier equations are not restored (use Open / a share link for that).
+        // Only your preferences (theme, editor, grid options) are remembered.
+        raw = localStorage.getItem(STORE_KEY);
+        if (!raw) return false;
+        const saved = JSON.parse(raw);
+        defaultState();
+        state.settings = Object.assign(defaultSettings(), saved.settings || {}, { app: 'graph', mode: '2d' });
+        return true;
+      }
       if (!raw) return false;
       const d = JSON.parse(raw);
       if (!Array.isArray(d.items) || !d.items.length) return false;

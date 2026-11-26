@@ -132,6 +132,15 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
 
     // MARK: navigation, links, downloads
 
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        #if DEBUG
+        // Automated tests: run a script file inside the page a few seconds after it loads.
+        if let f = ProcessInfo.processInfo.environment["GC_EVAL_JS"], let js = try? String(contentsOfFile: f, encoding: .utf8) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { webView.evaluateJavaScript(js, completionHandler: nil) }
+        }
+        #endif
+    }
+
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         if action.shouldPerformDownload { decisionHandler(.download); return }
         if let url = action.request.url, let scheme = url.scheme, ["http", "https", "mailto"].contains(scheme) {
