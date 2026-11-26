@@ -374,3 +374,8 @@ body.app-geo #btnFit, body.app-geo #btnSquare { display: none; }
   #side:has(#ask:not([hidden])) #list, #side:has(#ask:not([hidden])) .bottom, #side:has(#ask:not([hidden])) #keypad { display: none; }
   #ask { height: auto; flex: 1 1 auto; min-height: 0; max-height: none; border-bottom: 0; }
 }
+
+/* Only real text can be selected; the graph and the controls cannot be "selected all" any more */
+body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+input, textarea, select, math-field, [contenteditable="true"], .ab, .ask-intro, .popover, .selectable { -webkit-user-select: text; user-select: text; }
+canvas { -webkit-user-select: none; user-select: none; }

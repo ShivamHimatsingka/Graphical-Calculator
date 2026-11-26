@@ -84,12 +84,16 @@ f = Ask.facts([fx((x) => x ** 3, 'f'), fx((x) => x ** 3, 'y=f(x)')]); ok(f.point
   const st2 = {}; sb.localStorage = { getItem: (k) => (k in st2 ? st2[k] : null), setItem: (k, v) => { st2[k] = String(v); }, removeItem: (k) => { delete st2[k]; } };
   ok(Ask.getProviderId() === 'gemini', 'default provider is gemini outside the Mac app');
   sb.__native = 'macos'; sb.__nativeModel = {}; Ask.native = { ready: true, state: 'ready', name: 'Qwen' };
-  ok(Ask.getProviderId() === 'local' && Ask.hasAI(), 'Mac app defaults to the on-device model once installed');
-  Ask.native = { ready: false, state: 'none' }; ok(Ask.getProviderId() === 'local' && !Ask.hasAI(), 'Mac app still defaults to the on-device model (never silently to a cloud one) when it is not installed');
+  ok(Ask.activeId() === 'local' && Ask.hasAI(), 'Mac app defaults to the on-device model once installed');
+  Ask.native = { ready: false, state: 'none' }; ok(Ask.activeId() === 'local' && !Ask.hasAI(), 'Mac app still defaults to the on-device model (never silently to a cloud one) when it is not installed');
   Ask.setProviderId('local'); ok(Ask.getProviderId() === 'local' && !Ask.hasAI(), 'chosen local provider without model is not usable');
   ok(/Choose offline model/.test(Ask.friendlyError({ status: 503, message: 'The offline AI model is not installed.' })), 'local 503 explains how to install');
   let cap2 = {}; Ask.native = { ready: true }; sb.__nativeFetch = async (u, o) => { cap2.url = u; cap2.body = JSON.parse(o.body); return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: '{}' } }] }), text: async () => '' }; };
   await Ask.callAI([{ role: 'user', content: 'U' }]); ok(/local\.model/.test(cap2.url) && cap2.body.max_tokens > 0 && cap2.body.model === 'local' && cap2.body.chat_template_kwargs.enable_thinking === false, 'local call goes through the native bridge with thinking off');
+  // a stale cloud choice without a key must not beat the on-device model in the Mac app
+  sb.__native = 'macos'; sb.__nativeModel = {}; for (const k of Object.keys(st2)) delete st2[k];
+  Ask.setProviderId('gemini'); ok(Ask.getProviderId() === 'gemini' && Ask.activeId() === 'local', 'a cloud choice without a key is selected but the on-device model stays active');
+  Ask.setKey('AIza-test'); ok(Ask.activeId() === 'gemini', 'a cloud provider with a saved key becomes active');
   delete sb.__native; delete sb.__nativeModel; delete sb.__nativeFetch;
   console.log(`ask provider tests done: ${pass} passed`); if (fails.length) { console.error(fails.join('\n')); process.exit(1); }
 })();
@@ -102,6 +106,21 @@ f = Ask.facts([fx((x) => 2 * x + 1, 'y=a*x+1'), fx((x) => -x + 7, 'y=-x+7')]); o
 
 ok(Ask.isProse('x = 0 to 50') && Ask.isProse('x=0to50') && Ask.isProse('y = the area') && !Ask.isProse('y=x^2{0<=x<=50}') && !Ask.isProse('y = sin(x) + 2') && !Ask.isProse('(25,625)') && !Ask.isProse('y=sqrt(x)'), 'prose rows are detected, maths is not');
 ok(Ask.proseErrors([{ text: 'x = 0 to 50' }, { text: 'y=x' }]).length === 1, 'prose rows are reported for repair');
+
+f = Ask.facts([fx((x) => 2000 / x + 2 * Math.PI * x * x, 'y=2000/x+2*pi*x^2')]);
+ok(f.points.filter((q) => q.kind === 'max').length === 0 && f.points.some((q) => q.kind === 'min' && Math.abs(q.x - 5.4193) < 1e-3 && Math.abs(q.y - 553.58) < 0.01) && f.points.every((q) => Math.abs(q.y) < 1e6), 'a pole is never reported as a maximum (surface-area-of-a-can case)');
+ok(Ask.isHalfPlane('x > 0') && Ask.isHalfPlane('y>=-3') && !Ask.isHalfPlane('1<x<3') && !Ask.isHalfPlane('y>x^2') && Ask.proseErrors([{ text: 'x>0' }]).length === 1, 'lone half-plane inequalities are rejected, regions are kept');
+
+{ const can = [fx((x) => 2000 / x + 2 * Math.PI * x * x, 'can')]; const pts = Ask.facts(can, { lo: -50, hi: 50 }).points; const w = Ask.frame(can, pts);
+  ok(w.xmin < 5.4193 && w.xmax > 5.4193 && w.ymin < 553 && w.ymax > 553 && w.ymax < 5e4, 'frame shows the minimum of the can curve without being blown up by the pole');
+  const w2 = Ask.frame([fx((x) => 1 / x, 'inv')], []); ok(w2.xmax - w2.xmin === 20 && w2.ymax - w2.ymin < 1e5, 'frame stays sane for 1/x with no points');
+  const w3 = Ask.frame([], [{ x: 25, y: 625 }, { x: 0, y: 0 }, { x: 50, y: 0 }]); ok(w3.xmin < 0 && w3.xmax > 50 && w3.ymax > 625, 'frame includes every labelled point'); }
+
+{ const c = Ask.cleanExplanation('Substitute h: $ y = 2\\pi x \\left(\\frac{1000}{\\pi x^2}\\right) + 2\\pi x^2 = \\frac{2000}{x} + 2\\pi x^2 $. Also \\pi r^2 h and \\times.');
+  ok(!/\\|\$/.test(c), 'long $...$ maths and leftover LaTeX commands are fully converted: ' + c); ok(/π/.test(c), 'pi becomes the pi symbol'); }
+
+{ const field = Ask.facts([fx((x) => (120 * x - x * x) / 2, 'field')], { lo: -250, hi: 250 });
+  ok(field.points.some((q) => q.kind === 'max' && Math.abs(q.x - 60) < 1e-3 && Math.abs(q.y - 1800) < 1e-3) && field.points.some((q) => q.kind === 'zero' && Math.abs(q.x - 120) < 1e-3), 'features out to x=120 are found (fence problem)'); }
 
 if (fails.length) { console.error(fails.join('\n')); process.exit(1); }
 console.log(`ask tests: ${pass} passed`);

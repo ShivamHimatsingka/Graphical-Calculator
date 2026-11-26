@@ -23,8 +23,8 @@
   Ask.SYSTEM_PROMPT = `You are the graphing assistant inside a web graphing calculator (like Desmos). Turn the user's question (maths, science, or a word problem) into rows the calculator can plot, and explain the answer clearly for any learner.
 
 Reply with ONE JSON object and nothing else:
-{"title":"short folder title","explanation":"markdown","rows":[{"text":"calculator expression"}],"window":{"xmin":-10,"xmax":10,"ymin":-10,"ymax":10}}
-("window" is optional.)
+{"title":"short folder title","explanation":"markdown","rows":[{"text":"calculator expression"}]}
+(Optionally add "window":{"xmin":0,"xmax":60,"ymin":0,"ymax":2000} but ONLY when the interesting part of the graph is far from the origin; the calculator frames the graph itself otherwise.)
 
 Rules for rows (plain text, NOT LaTeX, one expression per row):
 - x is the horizontal axis, y the vertical. Operators + - * / ^ . Functions: sqrt(x) abs(x) sin cos tan asin acos atan ln log exp floor, constants pi and e. Implicit multiplication is fine (2x, 3(x+1)).
@@ -61,7 +61,9 @@ Explanation: friendly, step by step, numbered steps, short paragraphs, at most 2
 
   // Rows must be mathematics. Prose such as "x = 0 to 50" would be read as 0*t*o*50 and spawn junk sliders.
   Ask.isProse = (t) => /(^|[^a-z])(to|and|or|where|for|the|is|are|at|of|when|then|with|from|between|through|per)([^a-z]|$)/i.test(String(t).replace(/\{[^}]*\}/g, (m) => m.replace(/[a-z]+/gi, (w) => (/^(and|or)$/i.test(w) ? 'x' : w))));
-  Ask.proseErrors = (rows) => rows.filter((r) => Ask.isProse(r.text)).map((r) => ({ text: r.text, err: 'contains words; a row must contain only mathematics (use <= and >= for ranges, e.g. y=x^2{0<=x<=50})' }));
+  // "x > 0" on its own shades half the plane; models write it as a domain note. Put the limit on the equation instead: y=...{x>0}.
+  Ask.isHalfPlane = (t) => /^\s*[xy]\s*(?:>=|<=|>|<|≥|≤)\s*-?[\d.]+\s*$/i.test(String(t));
+  Ask.proseErrors = (rows) => rows.filter((r) => Ask.isProse(r.text) || Ask.isHalfPlane(r.text)).map((r) => ({ text: r.text, err: Ask.isHalfPlane(r.text) ? 'a lone inequality like x>0 shades half the plane; put the limit on the equation instead, e.g. y=x^2{x>0}' : 'contains words; a row must contain only mathematics (use <= and >= for ranges, e.g. y=x^2{0<=x<=50})' }));
 
   // Small models often double-escape newlines and write LaTeX; turn both into what the renderer understands.
   Ask.cleanExplanation = (text) => {
@@ -69,14 +71,17 @@ Explanation: friendly, step by step, numbered steps, short paragraphs, at most 2
     // A literal backslash-n (not a real newline) that is not the start of a LaTeX command like \neq or \nu.
     t = t.replace(/\\n(?!(?:eq|u|ot|e|i|otin|abla|cong|mid|parallel|leq|geq|less|gtr|leftarrow|rightarrow|ewline)\b)/g, '\n').replace(/\\t(?![a-z])/g, ' ');
     const tex = (m) => { let r = m.trim(); if (global.LX) { try { r = global.LX.latexToText(r); } catch (e) { /* keep */ } } return '`' + r.replace(/`/g, '') + '`'; };
-    t = t.replace(/\\\(([\s\S]+?)\\\)/g, (_, m) => tex(m)).replace(/\\\[([\s\S]+?)\\\]/g, (_, m) => tex(m)).replace(/\$\$([\s\S]+?)\$\$/g, (_, m) => tex(m)).replace(/(^|[^\\\w])\$([^$\n]{1,80}?)\$(?!\w)/g, (_, a, m) => a + tex(m));
+    t = t.replace(/\\\(([\s\S]+?)\\\)/g, (_, m) => tex(m)).replace(/\\\[([\s\S]+?)\\\]/g, (_, m) => tex(m)).replace(/\$\$([\s\S]+?)\$\$/g, (_, m) => tex(m)).replace(/(^|[^\\\w])\$\s*([^$\n]{1,400}?)\s*\$(?!\w)/g, (_, a, m) => a + tex(m));
+    // LaTeX that is left outside any delimiters: keep the useful symbols, drop the rest of the backslashes
+    const SYM = { pi: 'π', times: '×', cdot: '·', left: '', right: '', theta: 'θ', infty: '∞', leq: '≤', geq: '≥', neq: '≠', approx: '≈', sqrt: '√', div: '÷', pm: '±', Delta: 'Δ', alpha: 'α', beta: 'β' };
+    t = t.replace(/\\([A-Za-z]+)/g, (m, c) => (c in SYM ? SYM[c] : (/^(neq|nu|not)$/.test(c) ? m : c)));
     return t.slice(0, 4000);
   };
 
   /* ---------------- verified facts (computed by the calculator) ---------------- */
   // fxs: [{ label, f(x) }]  -> { lines:[...], points:[{x,y,label}] }
   Ask.facts = (fxs, range) => {
-    const lo = range ? range.lo : -50, hi = range ? range.hi : 50, N = 4000;
+    const lo = range ? range.lo : -250, hi = range ? range.hi : 250, N = Math.min(20000, Math.max(4000, Math.round((hi - lo) * 20)));
     const lines = [], points = [];
     const ok = (v) => Number.isFinite(v) && Math.abs(v) < 1e8;
     const sample = (f) => { const xs = [], ys = []; for (let i = 0; i <= N; i++) { const x = lo + (hi - lo) * i / N; xs.push(x); const y = f(x); ys.push(ok(y) ? y : NaN); } return { xs, ys }; };
@@ -95,18 +100,18 @@ Explanation: friendly, step by step, numbered steps, short paragraphs, at most 2
     for (const q of S) {
       const { xs, ys } = q.s;
       const zs = roots(q.f, xs, ys, 1).slice(0, 4);
-      if (zs.length) { lines.push(`\`${q.label}\` crosses the x-axis at x = ${zs.map(fmtN).join(', ')}.`); zs.forEach((z) => points.push({ x: z, y: 0, kind: 'zero' })); }
+      if (zs.length) { lines.push(`\`${q.label}\` crosses the x-axis at x = ${zs.map(fmtN).join(', ')}.`); zs.forEach((z) => points.push({ x: z, y: 0, kind: 'zero', color: q.color })); }
       const y0 = q.f(0); if (ok(y0) && lo <= 0 && hi >= 0) lines.push(`\`${q.label}\` crosses the y-axis at y = ${fmtN(y0)}.`);
       const ext = [];
-      for (let i = 1; i < N; i++) { const a = ys[i - 1], b = ys[i], c = ys[i + 1]; if ([a, b, c].every(Number.isFinite) && (b - a) * (c - b) < 0 && Math.abs(b) < 1e6) { let l = xs[i - 1], r = xs[i + 1]; const max = b > a; for (let k = 0; k < 80; k++) { const m1 = l + (r - l) / 3, m2 = r - (r - l) / 3; if (max ? q.f(m1) < q.f(m2) : q.f(m1) > q.f(m2)) l = m1; else r = m2; } const xm = (l + r) / 2; ext.push({ x: xm, y: q.f(xm), max }); } }
-      ext.slice(0, 3).forEach((e) => { lines.push(`\`${q.label}\` has a ${e.max ? 'maximum' : 'minimum'} at (${fmtN(e.x)}, ${fmtN(e.y)}).`); points.push({ x: e.x, y: e.y, kind: e.max ? 'max' : 'min' }); });
+      for (let i = 1; i < N; i++) { const a = ys[i - 1], b = ys[i], c = ys[i + 1]; if ([a, b, c].every(Number.isFinite) && (b - a) * (c - b) < 0 && Math.abs(b) < 1e6) { let l = xs[i - 1], r = xs[i + 1]; const max = b > a; for (let k = 0; k < 80; k++) { const m1 = l + (r - l) / 3, m2 = r - (r - l) / 3; if (max ? q.f(m1) < q.f(m2) : q.f(m1) > q.f(m2)) l = m1; else r = m2; } const xm = (l + r) / 2, ym = q.f(xm); const bound = 2 * Math.max(Math.abs(a), Math.abs(b), Math.abs(c)) + 1; if (Number.isFinite(ym) && Math.abs(ym) <= bound) ext.push({ x: xm, y: ym, max }); } } // an extremum is never far beyond its neighbours: that would be a pole
+      ext.slice(0, 3).forEach((e) => { lines.push(`\`${q.label}\` has a ${e.max ? 'maximum' : 'minimum'} at (${fmtN(e.x)}, ${fmtN(e.y)}).`); points.push({ x: e.x, y: e.y, kind: e.max ? 'max' : 'min', color: q.color }); });
     }
     for (let i = 0; i < S.length; i++) for (let j = i + 1; j < S.length; j++) {
       const A = S[i], B = S[j], h = (x) => A.f(x) - B.f(x);
       const ys = A.s.ys.map((v, k) => (Number.isFinite(v) && Number.isFinite(B.s.ys[k]) ? v - B.s.ys[k] : NaN));
       const fin = ys.filter(Number.isFinite); if (fin.length && fin.filter((d) => Math.abs(d) < 1e-9).length > fin.length * 0.5) continue; // same curve
       const rs = roots(h, A.s.xs, ys, 1).slice(0, 4);
-      if (rs.length) { lines.push(`\`${A.label}\` and \`${B.label}\` meet at ${rs.map((r) => `(${fmtN(r)}, ${fmtN(A.f(r))})`).join(' and ')}.`); rs.forEach((r) => points.push({ x: r, y: A.f(r), kind: 'int' })); }
+      if (rs.length) { lines.push(`\`${A.label}\` and \`${B.label}\` meet at ${rs.map((r) => `(${fmtN(r)}, ${fmtN(A.f(r))})`).join(' and ')}.`); rs.forEach((r) => points.push({ x: r, y: A.f(r), kind: 'int', color: A.color })); }
       else if (fxs.length === 2) lines.push(`\`${A.label}\` and \`${B.label}\` do not cross in this range.`);
     }
     const order = { int: 0, max: 1, min: 1, zero: 2 };
@@ -114,6 +119,23 @@ Explanation: friendly, step by step, numbered steps, short paragraphs, at most 2
     points.forEach((p) => { if (Math.abs(p.x) < 1e-7) p.x = 0; if (Math.abs(p.y) < 1e-7) p.y = 0; });
     const pts = points.sort((a, b) => order[a.kind] - order[b.kind]).filter((p) => { const k = fmtN(p.x) + ',' + fmtN(p.y); if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 8);
     return { lines, points: pts };
+  };
+
+  // A sensible view for the answer just drawn: x around the interesting points, y from the curves over that x range.
+  Ask.frame = (fxs, points) => {
+    const ok = (v) => Number.isFinite(v) && Math.abs(v) < 1e6;
+    const px = points.map((p) => p.x).filter(ok), py = points.map((p) => p.y).filter(ok);
+    let x0 = -10, x1 = 10;
+    if (px.length) { x0 = Math.min(0, ...px); x1 = Math.max(0, ...px); const span = Math.max(x1 - x0, 1); x0 -= span * 0.25; x1 += span * 0.25; if (x1 - x0 < 4) { const c = (x0 + x1) / 2; x0 = c - 2; x1 = c + 2; } }
+    const ys = py.slice();
+    for (const q of fxs) for (let i = 0; i <= 200; i++) { const y = q.f(x0 + (x1 - x0) * i / 200); if (ok(y)) ys.push(y); }
+    if (!ys.length) return { xmin: x0, xmax: x1, ymin: -10, ymax: 10 };
+    ys.sort((a, b) => a - b);
+    const lo = ys[Math.floor(ys.length * 0.04)], hi = ys[Math.ceil(ys.length * 0.92) - 1];
+    let y0 = Math.min(lo, ...py, 0), y1 = Math.max(hi, ...py, 0);
+    if (y1 - y0 < 1e-6) { y0 -= 1; y1 += 1; }
+    const pad = (y1 - y0) * 0.12;
+    return { xmin: x0, xmax: x1, ymin: y0 - pad, ymax: y1 + pad };
   };
 
   /* ---------------- rule engine (no network) ---------------- */
@@ -214,33 +236,39 @@ Explanation: friendly, step by step, numbered steps, short paragraphs, at most 2
   };
   Ask.native = { ready: false, state: 'none', name: '', progress: 0 };
   const isNative = () => !!global.__native && !!global.__nativeModel;
-  Ask.getProviderId = () => { const id = store.get(LS + 'provider'); if (Ask.providers[id] && (!Ask.providers[id].nativeOnly || isNative())) return id; return isNative() ? 'local' : 'gemini'; };
+  // SELECTED = what the settings show. ACTIVE = what answers questions. In the Mac app the on-device model is the
+  // default: a cloud provider becomes active only once you have really set it up (saved a key / address), so a stale
+  // choice with no key can never hide the offline model.
+  Ask.getProviderId = () => { const id = store.get(LS + 'provider'); return Ask.providers[id] && (!Ask.providers[id].nativeOnly || isNative()) ? id : (isNative() ? 'local' : 'gemini'); };
   Ask.setProviderId = (id) => store.set(LS + 'provider', Ask.providers[id] ? id : '');
   Ask.getProvider = () => Ask.providers[Ask.getProviderId()];
-  Ask.getKey = () => store.get(LS + 'key-' + Ask.getProviderId()) || (Ask.getProviderId() === 'pollinations' ? Ask.config.publishableKey : '') || '';
+  const configured = (id) => { const p = Ask.providers[id]; return !!p && (p.local ? true : p.custom ? !!store.get(LS + 'endpoint') && !!store.get(LS + 'model-custom') : !!store.get(LS + 'key-' + id) || (id === 'pollinations' && !!Ask.config.publishableKey)); };
+  Ask.activeId = () => { const id = Ask.getProviderId(); if (!isNative()) return id; return id !== 'local' && configured(id) ? id : 'local'; };
+  Ask.activeProvider = () => Ask.providers[Ask.activeId()];
+  Ask.getKey = (id) => { id = id || Ask.getProviderId(); return store.get(LS + 'key-' + id) || (id === 'pollinations' ? Ask.config.publishableKey : '') || ''; };
   Ask.setKey = (k) => store.set(LS + 'key-' + Ask.getProviderId(), (k || '').trim());
-  Ask.getModel = () => store.get(LS + 'model-' + Ask.getProviderId()) || Ask.getProvider().models[0] || '';
+  Ask.getModel = (id) => { id = id || Ask.getProviderId(); return store.get(LS + 'model-' + id) || Ask.providers[id].models[0] || ''; };
   Ask.setModel = (m) => store.set(LS + 'model-' + Ask.getProviderId(), (m || '').trim());
-  Ask.getEndpoint = () => { const p = Ask.getProvider(); return p.custom ? store.get(LS + 'endpoint') : p.endpoint; };
+  Ask.getEndpoint = (id) => { const p = Ask.providers[id || Ask.getProviderId()]; return p.custom ? store.get(LS + 'endpoint') : p.endpoint; };
   Ask.setEndpoint = (u) => store.set(LS + 'endpoint', (u || '').trim());
   // true when a question could be sent to an AI right now
-  Ask.hasAI = () => { const p = Ask.getProvider(); if (p.local) return isNative() && Ask.native.ready; return p.custom ? !!Ask.getEndpoint() && !!Ask.getModel() : !!Ask.getKey(); };
+  Ask.hasAI = () => { const id = Ask.activeId(), p = Ask.providers[id]; if (p.local) return isNative() && !!Ask.native.ready; return p.custom ? !!Ask.getEndpoint(id) && !!Ask.getModel(id) : !!Ask.getKey(id); };
   Ask.friendlyError = (e) => {
     if (e && e.name === 'AbortError') return 'Stopped.';
     const s = e && e.status; let name = 'AI';
-    try { name = Ask.getProvider().label.replace(/ \(.*\)$/, ''); } catch (err) { /* ignore */ }
-    if (Ask.providers[Ask.getProviderId()].local && (s === 503 || e.network)) return (s === 503 && e.message) ? e.message + ' Open AI settings → Choose offline model.' : 'The offline AI engine did not respond. Open AI settings → Choose offline model.';
+    try { name = Ask.activeProvider().label.replace(/ \(.*\)$/, ''); } catch (err) { /* ignore */ }
+    if (Ask.activeProvider().local && (s === 503 || e.network)) return (s === 503 && e.message) ? e.message + ' Open AI settings → Choose offline model.' : 'The offline AI engine did not respond. Open AI settings → Choose offline model.';
     if (s === 401 || s === 403 && /key|auth|permission/i.test((e && e.message) || '')) return `${name} did not accept the key. Open AI settings and check it (and that it belongs to ${name}).`;
     if (s === 402 || s === 403) return `${name} says this key has no credit or access right now. Wait a while or try another provider in AI settings.`;
     if (s === 404) return `${name} does not know that model. Pick another model in AI settings.`;
     if (s === 429) return `${name} says too many requests. Please wait a few seconds and try again (free tiers are rate limited).`;
     if (s >= 500) return `${name} is having trouble. Please try again in a moment.`;
-    if (e && e.network) return `Could not reach ${name} from the browser. Check your connection${Ask.getProvider().custom ? ', the address, and that the server allows web pages to call it (CORS)' : ''}.`;
+    if (e && e.network) return `Could not reach ${name} from the browser. Check your connection${Ask.activeProvider().custom ? ', the address, and that the server allows web pages to call it (CORS)' : ''}.`;
     return `Could not get an answer from ${name}. Check your connection and settings, then try again.`;
   };
   Ask.callAI = async (messages, opts) => {
     opts = opts || {};
-    const p = Ask.getProvider(), key = Ask.getKey(), url = Ask.getEndpoint(), model = opts.model || Ask.getModel();
+    const aid = Ask.activeId(), p = Ask.providers[aid], key = Ask.getKey(aid), url = Ask.getEndpoint(aid), model = opts.model || Ask.getModel(aid);
     if (!Ask.hasAI()) throw new AskError(401, 'not configured');
     const doFetch = opts.fetch || global.__nativeFetch || fetch;
     const send = async (headers, body) => {
@@ -305,9 +333,10 @@ Explanation: friendly, step by step, numbered steps, short paragraphs, at most 2
       $('#askProvLink').hidden = !!p.local; $('#askProvLink').innerHTML = p.custom ? 'Runs against any OpenAI-compatible address, e.g. a local Ollama or LM Studio server.' : `Get a key at <a href="${esc(p.link)}" target="_blank" rel="noopener">${esc(p.link.replace(/^https:\/\//, ''))}</a>${p.free ? ' — free tier available' : ''}.`;
       $('#askKeyState').textContent = k ? `Key saved in this browser (${k.slice(0, 4)}…).` : (p.custom ? 'Key is optional for local servers.' : 'No key yet — the built-in solver still works.');
       $('#askModels').innerHTML = p.models.map((m) => `<option value="${esc(m)}">`).join(''); $('#askModel').value = Ask.getModel();
-      const ok = Ask.hasAI(), pill = $('#askSetBtn');
+      const ok = Ask.hasAI(), pill = $('#askSetBtn'), aid = Ask.activeId(), ap = Ask.providers[aid];
       pill.classList.toggle('ready', ok);
-      $('#askPillText').textContent = !ok ? 'Set up AI' : p.local ? `On-device · ${String(Ask.native.name || 'model').replace(/[-_ ]?instruct(-\d+)?/i, '')}` : `${p.label.replace(/ \(.*\)$/, '')} · ${Ask.getModel() || ''}`.replace(/ · $/, '');
+      $('#askPillText').textContent = !ok ? 'Set up AI' : ap.local ? `On-device · ${String(Ask.native.name || 'model').replace(/[-_ ]?instruct(-\d+)?/i, '')}` : `${ap.label.replace(/ \(.*\)$/, '')} · ${Ask.getModel(aid) || ''}`.replace(/ · $/, '');
+      if (isNative() && !p.local && aid === 'local') $('#askKeyState').textContent = 'Not saved yet. The on-device model is used until you add a key.';
     };
     $('#askManage').onclick = () => { if (isNative()) global.__nativeModel.manage(); };
     const refreshNative = () => { if (!isNative()) return; global.__nativeModel.status().then((st) => { Ask.native = Object.assign({ ready: false, state: 'none' }, st); fillProviders(); syncSettings(); }).catch(() => { /* ignore */ }); };
@@ -339,11 +368,13 @@ Explanation: friendly, step by step, numbered steps, short paragraphs, at most 2
     function present(plan, extra) {
       const res = api.apply(plan, { fresh: $('#askFresh').checked });
       const addedRows = res.added;
-      if (plan.window) api.setRange(plan.window); else api.fit();
       let factsHtml = '';
-      const facts = Ask.facts(api.fxPlots(res.ids), api.range ? api.range() : null);
+      const fxs = api.fxPlots(res.ids);
+      const w = plan.window, facts = Ask.facts(fxs, { lo: Math.min(-250, w ? w.xmin : 0), hi: Math.max(250, w ? w.xmax : 0) });
       if (facts.points.length) api.addPoints(facts.points, res.folderId);
-      if (!plan.window && facts.points.length) api.fit(); // include the labelled points (e.g. a vertex) in the view
+      // A model's own window is trusted only when it really contains the verified points (models often copy a default).
+      const inside = (win) => facts.points.every((p) => p.x >= win.xmin && p.x <= win.xmax && p.y >= win.ymin && p.y <= win.ymax);
+      const win = w && inside(w) ? w : Ask.frame(fxs, facts.points); api.setRange(win); // frame just this answer, never the whole document
       if (facts.lines.length) factsHtml = `<div class="afacts"><b>Verified results</b> <span class="amuted">(computed by the calculator)</span>${Ask.render(facts.lines.map((l) => '- ' + l).join('\n'), api.pretty)}</div>`;
       const dropped = res.dropped.length ? `<div class="awarn">Skipped ${res.dropped.length} row${res.dropped.length > 1 ? 's' : ''} the calculator could not read: ${res.dropped.map((d) => `<code>${esc(d.text)}</code>`).join(', ')}</div>` : '';
       const d = bubble('bot', `<div class="asrc">${plan.source === 'rules' ? 'Built-in solver' : 'AI helper'} · added ${addedRows} row${addedRows === 1 ? '' : 's'} in a folder “${esc(plan.title)}” — edit any box to change the graph</div>${Ask.render(plan.explanation || '', api.pretty)}${factsHtml}${dropped}<div class="aact"><button class="chip" data-undo>Undo</button></div>${extra || ''}`);
@@ -364,7 +395,7 @@ Explanation: friendly, step by step, numbered steps, short paragraphs, at most 2
           return;
         }
         status = bubble('bot', '<span class="amuted">Thinking…</span>');
-        const t0 = Date.now(); const label = () => (Ask.getProvider().local ? 'Thinking on this Mac' : 'Thinking') + ` · ${Math.round((Date.now() - t0) / 1000)}s`;
+        const t0 = Date.now(); const label = () => (Ask.activeProvider().local ? 'Thinking on this Mac' : 'Thinking') + ` · ${Math.round((Date.now() - t0) / 1000)}s`;
         let phase = 'Thinking'; tick = setInterval(() => { if (status) status.innerHTML = `<span class="amuted">${phase === 'Thinking' ? label() : phase}…</span>`; }, 1000);
         const messages = [{ role: 'system', content: Ask.SYSTEM_PROMPT }, ...history.slice(-4), { role: 'user', content: Ask.userPrompt(q, api.currentRows()) }];
         history.push({ role: 'user', content: q });
@@ -380,7 +411,7 @@ Explanation: friendly, step by step, numbered steps, short paragraphs, at most 2
           if (attempt < 2) { messages.push({ role: 'assistant', content: String(lastReply).slice(0, 2500) }, { role: 'user', content: Ask.repairPrompt(bad) }); plan.__retry = true; continue; }
         }
         clearInterval(tick); status.remove(); status = null;
-        if (plan) plan.rows = plan.rows.filter((r) => !Ask.isProse(r.text));
+        if (plan) plan.rows = plan.rows.filter((r) => !Ask.isProse(r.text) && !Ask.isHalfPlane(r.text));
         if (!plan) { bubble('bot', '<p>I could not turn that into a graph. Try rephrasing it, or give an equation.</p>'); return; }
         plan.source = 'ai';
         if (!plan.rows.length) { bubble('bot', `<div class="asrc">AI helper</div>${Ask.render(plan.explanation || 'There is nothing to draw for this question.', api.pretty)}`); return; }

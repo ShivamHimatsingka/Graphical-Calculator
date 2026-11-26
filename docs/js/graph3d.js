@@ -111,7 +111,10 @@
         this._idle = setTimeout(() => { this.interacting = false; this.requestDraw(false); }, 160);
       }
       if (this._raf) return;
-      this._raf = requestAnimationFrame(() => { this._raf = 0; this.draw(); });
+      this._raf = requestAnimationFrame(() => { this._raf = 0; clearTimeout(this._rafT); this.draw(); });
+      // If the page is not being painted (window in the background, a native dialog open) the animation frame may not fire,
+      // which used to leave the canvas stuck on an old view. A timer makes sure the latest view is always drawn.
+      clearTimeout(this._rafT); this._rafT = setTimeout(() => { if (this._raf) { cancelAnimationFrame(this._raf); this._raf = 0; this.draw(); } }, 120);
     }
 
     /* ---------- projection ---------- */

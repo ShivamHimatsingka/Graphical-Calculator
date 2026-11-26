@@ -100,6 +100,7 @@
     setRange(xmin, xmax, ymin, ymax) {
       if (!(xmax > xmin) || !(ymax > ymin)) return;
       this.view = { x0: (xmin + xmax) / 2, y0: (ymin + ymax) / 2, sx: this.w / (xmax - xmin), sy: this.h / (ymax - ymin) };
+      this.autoFit = false; // an explicit view must survive layout changes (a resize used to snap it back to the default)
       this._viewChanged(false);
     }
     resetView() {
@@ -151,7 +152,10 @@
         this._idle = setTimeout(() => { this.interacting = false; this.requestDraw(false); }, 140);
       }
       if (this._raf) return;
-      this._raf = requestAnimationFrame(() => { this._raf = 0; this.draw(); });
+      this._raf = requestAnimationFrame(() => { this._raf = 0; clearTimeout(this._rafT); this.draw(); });
+      // If the page is not being painted (window in the background, a native dialog open) the animation frame may not fire,
+      // which used to leave the canvas stuck on an old view. A timer makes sure the latest view is always drawn.
+      clearTimeout(this._rafT); this._rafT = setTimeout(() => { if (this._raf) { cancelAnimationFrame(this._raf); this._raf = 0; this.draw(); } }, 120);
     }
 
     /* ---------- drawing ---------- */

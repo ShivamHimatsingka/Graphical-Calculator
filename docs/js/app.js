@@ -5,7 +5,8 @@
   'use strict';
   const { V, F, R, fmt } = ME;
   const STORE_KEY = 'graphical-calculator-web-v1';
-  const PALETTE = ['#c74440', '#2d70b3', '#388c46', '#6042a6', '#000000', '#fa7e19'];
+  // Six familiar colours only (no black, which vanishes in dark mode): blue, green, red, yellow, orange, purple.
+  const PALETTE = ['#2d70b3', '#388c46', '#c74440', '#d9a400', '#fa7e19', '#6042a6'];
   const RESERVED = new Set(['x', 'y', 'r', 'theta', 'rho', 'phi']);
   const $ = (s, r) => (r || document).querySelector(s);
   const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; };
@@ -54,12 +55,32 @@
 
   /* ================= pretty printing ================= */
   function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  // Display spacing: "y=100x-2x^2" -> "y = 100x − 2x^2" (binary operators only; exponents and unary minus are left alone).
+  function spaceMath(t) {
+    return String(t)
+      .replace(/\s*(≤|≥|≠|=|<|>)\s*/g, ' $1 ')
+      .replace(/(?<=[0-9A-Za-zπθτ)\u00b2\u00b3\u00b9\u2070-\u2079\u221e])\s*([+\-])\s*(?=[0-9A-Za-z(√π])/g, (m, op) => ' ' + (op === '-' ? '−' : '+') + ' ')
+      .replace(/,(?=\S)/g, ', ').replace(/ {2,}/g, ' ').trim();
+  }
+  // Plain-text version with Unicode superscripts, for note rows (textareas cannot show <sup>).
+  const SUP = { 0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹', '+': '⁺', '-': '⁻', '(': '⁽', ')': '⁾', n: 'ⁿ', i: 'ⁱ' };
+  function prettyText(src) {
+    let s = String(src).replace(/<=/g, '≤').replace(/>=/g, '≥').replace(/!=/g, '≠')
+      .replace(/(?<![A-Za-z])sqrt(?![A-Za-z])/g, '√').replace(/(?<![A-Za-z])cbrt(?![A-Za-z])/g, '∛')
+      .replace(/(?<![A-Za-z])pi(?![A-Za-z])/g, 'π').replace(/(?<![A-Za-z])theta(?![A-Za-z])/g, 'θ')
+      .replace(/(?<![A-Za-z])infinity(?![A-Za-z])/g, '∞').replace(/\*/g, '·');
+    s = s.replace(/\^(\([^()]*\)|-?[0-9]+|[A-Za-z])/g, (m, ex) => {
+      const raw = ex.replace(/^\(|\)$/g, '');
+      return [...raw].every((c) => SUP[c] !== undefined) ? [...raw].map((c) => SUP[c]).join('') : '^' + ex;
+    });
+    return spaceMath(s);
+  }
   function pretty(src) {
-    let s = src.replace(/<=/g, '≤').replace(/>=/g, '≥').replace(/!=/g, '≠')
+    let s = spaceMath(src.replace(/<=/g, '≤').replace(/>=/g, '≥').replace(/!=/g, '≠')
       .replace(/(?<![A-Za-z])sqrt(?![A-Za-z])/g, '√').replace(/(?<![A-Za-z])cbrt(?![A-Za-z])/g, '∛')
       .replace(/(?<![A-Za-z])pi(?![A-Za-z])/g, 'π').replace(/(?<![A-Za-z])theta(?![A-Za-z])/g, 'θ')
       .replace(/(?<![A-Za-z])tau(?![A-Za-z])/g, 'τ').replace(/(?<![A-Za-z])infinity(?![A-Za-z])/g, '∞')
-      .replace(/\*/g, '·');
+      .replace(/\*/g, '·'));
     const conv = (t) => {
       let out = '', i = 0;
       while (i < t.length) {
@@ -88,6 +109,24 @@
     };
     return conv(s);
   }
+
+  // Selecting the whole page (Select All, or a stray drag) used to leave everything highlighted with no way back.
+  // Text can only be selected where it makes sense (inputs, notes, chat answers, help); anywhere else a selection is dropped.
+  (function guardSelection() {
+    const EDIT = 'input,textarea,select,math-field,[contenteditable="true"]';
+    const KEEP = EDIT + ',.ab,.ask-intro,.popover,.selectable';
+    document.addEventListener('selectionchange', () => {
+      const a = document.activeElement; if (a && a.matches && a.matches(EDIT)) return;
+      const sel = window.getSelection(); if (!sel || sel.isCollapsed || !sel.anchorNode) return;
+      const el = sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement;
+      if (el && el.closest && el.closest(KEEP) && sel.focusNode && (sel.focusNode.nodeType === 1 ? sel.focusNode : sel.focusNode.parentElement).closest(KEEP)) return;
+      sel.removeAllRanges();
+    });
+    document.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'a' && !(e.target.matches && e.target.matches(EDIT))) e.preventDefault();
+    }, true);
+    document.addEventListener('mousedown', (e) => { if (!(e.target.closest && e.target.closest(KEEP))) { const sel = window.getSelection(); if (sel && !sel.isCollapsed) sel.removeAllRanges(); } }, true);
+  })();
 
   /* ================= evaluation ================= */
   function fmtValue(v) {
@@ -219,6 +258,7 @@
   function plotColor(c) { return state.settings.theme === 'dark' && c.toLowerCase() === '#000000' ? '#f2f2f2' : c; }
 
   function evaluate() {
+    for (const it of state.items) if ((it.type === 'expr' || it.type === 'table') && !PALETTE.includes(String(it.color || '').toLowerCase())) { it.color = PALETTE[state.colorIdx % PALETTE.length]; state.colorIdx++; }
     for (const k of Object.keys(V)) delete V[k];
     for (const k of Object.keys(F)) delete F[k];
     R.deg = !!state.settings.deg;
@@ -1357,7 +1397,7 @@
     const showStyle = item.type === 'expr' || item.type === 'table';
     let html = '';
     if (showStyle) {
-      html += `<div class="sec"><h4>Color</h4><div class="sw">${PALETTE.map((c) => `<button data-c="${c}" style="background:${c}" class="${c === item.color ? 'on' : ''}" aria-label="${c}"></button>`).join('')}<input type="color" value="${/^#[0-9a-f]{6}$/i.test(item.color) ? item.color : '#2d70b3'}" aria-label="Custom color"></div></div>
+      html += `<div class="sec"><h4>Color</h4><div class="sw">${PALETTE.map((c) => `<button data-c="${c}" style="background:${c}" class="${c === item.color ? 'on' : ''}" aria-label="${c}"></button>`).join('')}</div></div>
       <div class="sec"><h4>Line</h4><div class="seg" data-seg="line"><button data-v="solid" class="${item.line === 'solid' ? 'on' : ''}">Solid</button><button data-v="dashed" class="${item.line === 'dashed' ? 'on' : ''}">Dashed</button><button data-v="dotted" class="${item.line === 'dotted' ? 'on' : ''}">Dotted</button></div>
       <label>Thickness <input type="range" min="1" max="8" step="0.5" value="${item.width}" data-width></label></div>`;
     }
@@ -1813,7 +1853,9 @@
   }
 
   /* ================= Ask (question -> editable rows) ================= */
-  const stripMd = (t) => String(t || '').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').replace(/\n+/g, ' ').trim();
+  // Explanation -> plain note text: no markdown marks, maths in Unicode, one step per line, clipped at a sentence end.
+  const stripMd = (t) => String(t || '').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, (_, m) => prettyText(m)).replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  const clipNote = (t, n) => { if (t.length <= n) return t; const cut = t.slice(0, n); const e = Math.max(cut.lastIndexOf('\n'), cut.lastIndexOf('. '), cut.lastIndexOf('? ')); return (e > n * 0.5 ? cut.slice(0, e + 1) : cut.replace(/\s+\S*$/, '')).trim() + '…'; };
   function snapshotAll() {
     const r = graph.range();
     return { items: JSON.stringify(state.items.map((i) => (i.type === 'image' ? Object.assign({}, i, { src: '' }) : i))), colorIdx: state.colorIdx, tableCount: state.tableCount || 0, mode: state.settings.mode, range: [r.xmin, r.xmax, r.ymin, r.ymax] };
@@ -1831,7 +1873,8 @@
     currentRows: () => state.items.filter((i) => i.type === 'expr' && i.text).map((i) => i.text),
     range: () => { const r = graph.range(); return r && Number.isFinite(r.xmin) ? { lo: r.xmin, hi: r.xmax } : null; },
     setRange: (w) => graph.setRange(w.xmin, w.xmax, w.ymin, w.ymax),
-    fit: () => { if (state.settings.mode === '3d') return; fitView(); const r = graph.range(); const dy = (r.ymax - r.ymin) * 0.1, dx = (r.xmax - r.xmin) * 0.04; graph.setRange(r.xmin - dx, r.xmax + dx, r.ymin - dy, r.ymax + dy); },
+    rangeNow: () => { const r = graph.range(); return [r.xmin, r.xmax, r.ymin, r.ymax].map((v) => +v.toFixed(2)); },
+    fit: () => { if (state.settings.mode === '3d') return; fitView(); const r = graph.range(); if (!(r.ymax - r.ymin < 1e7) || !(r.xmax - r.xmin < 1e7)) { graph.setRange(-10, 10, -10, 10); return; } const dy = (r.ymax - r.ymin) * 0.1, dx = (r.xmax - r.xmin) * 0.04; graph.setRange(r.xmin - dx, r.xmax + dx, r.ymin - dy, r.ymax + dy); },
     // dry run: which of these rows cannot be used?
     check(texts) {
       const snap = state.items.slice(); const temps = texts.map((t) => newItem('expr', { text: t }));
@@ -1844,11 +1887,11 @@
     apply(plan, opts) {
       const snapshot = snapshotAll();
       const isDefaultDemo = state.items.length <= 3 && state.items.map((i) => i.text).join('|').replace(/\|+$/, '') === 'a=1|y=a sin(x)';
-      if ((opts && opts.fresh) || isDefaultDemo) { state.items = []; playing.clear(); }
+      if ((opts && opts.fresh) || isDefaultDemo) { state.items = []; playing.clear(); state.colorIdx = 0; }
       else state.items = state.items.filter((i) => !(i.type === 'expr' && !(i.text || '').trim() && !i.parent)); // drop blank placeholder rows
       const folder = newItem('folder', { text: String(plan.title || 'Ask').slice(0, 40) });
       const items = [folder];
-      const note = stripMd(plan.explanation).slice(0, 420);
+      const note = clipNote(stripMd(plan.explanation), 1100);
       if (note) { const n = newItem('note', { text: note }); n.parent = folder.id; items.push(n); }
       const rowItems = plan.rows.map((r) => { const it = newItem('expr', { text: r.text }); it.parent = folder.id; return it; });
       items.push(...rowItems); state.items.push(...items);
@@ -1876,15 +1919,15 @@
     fxPlots(ids) {
       return graph.plots.filter((p) => p.kind === 'fx' && ids.includes(p.id) && typeof p.f === 'function').map((p) => {
         const it = state.items.find((i) => i.id === p.id);
-        return { label: it ? it.text.replace(/\s+/g, '') : 'curve', f: (x) => { const y = p.f(x); return p.cond && !p.cond(x, y) ? NaN : y; } };
+        return { label: it ? it.text.replace(/\s+/g, '') : 'curve', color: it ? it.color : undefined, f: (x) => { const y = p.f(x); return p.cond && !p.cond(x, y) ? NaN : y; } };
       });
     },
     addPoints(points, folderId) {
       const last = state.items.filter((i) => i.parent === folderId).pop();
       let at = last ? state.items.indexOf(last) + 1 : state.items.length;
       const kinds = { int: 'Intersection', max: 'Maximum', min: 'Minimum', zero: 'Zero' };
-      points.forEach((pt) => {
-        const it = newItem('expr', { text: `(${parseFloat(pt.x.toPrecision(7))},${parseFloat(pt.y.toPrecision(7))})`, showLabel: true, label: '', dragMode: 'none', pointStyle: 'open' });
+      points.filter((pt) => Math.abs(pt.x) < 1e7 && Math.abs(pt.y) < 1e7).forEach((pt) => {
+        const it = newItem('expr', Object.assign({ text: `(${parseFloat(pt.x.toPrecision(7))},${parseFloat(pt.y.toPrecision(7))})`, showLabel: true, label: '', dragMode: 'none', pointStyle: 'open' }, pt.color ? { color: pt.color } : {}));
         it.parent = folderId; state.items.splice(at++, 0, it);
       });
       renderList(); evaluate();
@@ -2084,7 +2127,7 @@
     setupDnD();
     window.addEventListener('resize', () => graph.resize());
     if (innerWidth < 720) $('#btnKeypad').textContent = '⌨';
-    window.__gc = { askApi, state: () => state, recs, graph, graph3, geo: () => geo, plane, evaluate, rows, setText: (i, t) => { const it = state.items[i]; it.text = t; const r = rows.get(it.id); r.ed.set(t); evaluate(); } };
+    window.__gc = { prettyText, pretty, askApi, state: () => state, recs, graph, graph3, geo: () => geo, plane, evaluate, rows, setText: (i, t) => { const it = state.items[i]; it.text = t; const r = rows.get(it.id); r.ed.set(t); evaluate(); } };
   }
 
   async function boot() {

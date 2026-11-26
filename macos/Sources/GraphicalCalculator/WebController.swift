@@ -83,7 +83,10 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
             let action = (message.body as? [String: Any])?["a"] as? String
             Task { @MainActor in
                 if action == "manage" { self.openModelWindow?(); replyHandler(["ok": true], nil) }
-                else { replyHandler(ModelStore.shared.statusJSON(), nil) }
+                else { let st = ModelStore.shared.statusJSON(); #if DEBUG
+                    NSLog("model status: \(st)")
+                    #endif
+                    replyHandler(st, nil) }
             }
             return
         }
