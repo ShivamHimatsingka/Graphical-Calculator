@@ -2165,7 +2165,7 @@
     setupDnD();
     window.addEventListener('resize', () => graph.resize());
     if (innerWidth < 720) $('#btnKeypad').textContent = '⌨';
-    window.__gc = { prettyText, pretty, askApi, state: () => state, recs, graph, graph3, geo: () => geo, plane, evaluate, rows, setText: (i, t) => { const it = state.items[i]; it.text = t; const r = rows.get(it.id); r.ed.set(t); evaluate(); } };
+    window.__gc = { setSliderValue, syncSliderUI, refreshReadouts, recomputeVars, prettyText, pretty, askApi, state: () => state, recs, graph, graph3, geo: () => geo, plane, evaluate, rows, setText: (i, t) => { const it = state.items[i]; it.text = t; const r = rows.get(it.id); r.ed.set(t); evaluate(); } };
   }
 
   async function boot() {

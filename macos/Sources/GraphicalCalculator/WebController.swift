@@ -40,6 +40,9 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
         cfg.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "fetch")
         cfg.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "model")
         cfg.userContentController.add(self, name: "print")
+        #if DEBUG
+        cfg.userContentController.add(self, name: "dbg")   // automated tests can send text to /tmp/gc_js.log
+        #endif
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = false
@@ -85,6 +88,13 @@ final class WebController: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
 
     func userContentController(_ c: WKUserContentController, didReceive message: WKScriptMessage) {
         if message.name == "print" { DispatchQueue.main.async { self.printPage() } }
+        #if DEBUG
+        if message.name == "dbg", let t = message.body as? String {
+            let url = URL(fileURLWithPath: "/tmp/gc_js.log")
+            if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(Data((t + "\n").utf8)); try? h.close() }
+            else { try? Data((t + "\n").utf8).write(to: url) }
+        }
+        #endif
     }
 
     func userContentController(_ c: WKUserContentController, didReceive message: WKScriptMessage, replyHandler: @escaping (Any?, String?) -> Void) {

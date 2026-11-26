@@ -346,13 +346,20 @@
       this.lineStyle(ctx, p, p._sel ? 1.25 : 1);
       ctx.beginPath();
       let pen = false, lu = 0, lv = 0, lx = 0, ly = 0;
-      const lim = (a) => clamp(a, -1e6, 1e6);
+      // Keep drawn coordinates close to the visible area. Safari/WebKit takes seconds per frame to stroke paths whose points are
+      // hundreds of thousands of pixels away (y=3^x froze the page); Chrome clips them instantly.
+      const BAND = 3 * Math.max(W, H) + 100;
+      const lim = (a) => clamp(a, -BAND, BAND);
       const perp = (a, b) => (horizontal ? Math.abs(a[1] - b[1]) : Math.abs(a[0] - b[0]));
       const moveTo = (u, v) => { const [a, b] = sxy(u, v); lx = lim(a); ly = lim(b); ctx.moveTo(lx, ly); pen = true; lu = u; lv = v; };
       const lineTo = (u, v) => { const [a, b] = sxy(u, v); const nx = lim(a), ny = lim(b); ctx.lineTo(nx, ny); seg.push(lx, ly, nx, ny); lx = nx; ly = ny; lu = u; lv = v; };
       const subdiv = (u0, v0, u1, v1, depth) => {
         const a = sxy(u0, v0), b = sxy(u1, v1);
         const d = perp(a, b);
+        // Both ends off-screen on the same side: nothing visible can happen in between, so don't subdivide. Without this a steep
+        // curve (y=3^x) produced ~50,000 segments and Safari needed seconds to stroke them.
+        const o = horizontal ? 1 : 0, size = horizontal ? H : W;
+        if ((a[o] < 0 && b[o] < 0) || (a[o] > size && b[o] > size)) { lineTo(u1, v1); return; }
         if (d > 3 && depth < 10) {
           const um = (u0 + u1) / 2, vm = ev(um);
           if (Number.isNaN(vm)) { moveTo(u1, v1); return; }
@@ -403,7 +410,8 @@
       for (let i = 0; i <= N; i++) {
         const pt = getPoint(i);
         if (!pt || !Number.isFinite(pt[0]) || !Number.isFinite(pt[1])) { pen = false; continue; }
-        const x = clamp(this.X(pt[0]), -1e6, 1e6), y = clamp(this.Y(pt[1]), -1e6, 1e6);
+        const BAND = 3 * Math.max(W, H) + 100;
+        const x = clamp(this.X(pt[0]), -BAND, BAND), y = clamp(this.Y(pt[1]), -BAND, BAND);
         if (!pen) { ctx.moveTo(x, y); pen = true; }
         else {
           if (Math.abs(x - lx) > 3 * W + 100 || Math.abs(y - ly) > 3 * H + 100) { ctx.moveTo(x, y); }
@@ -843,7 +851,7 @@
         const xa = r.xmin - 1, xb = r.xmax + 1;
         ctx.save();
         ctx.strokeStyle = sel.color; ctx.lineWidth = width; ctx.setLineDash(dash); ctx.globalAlpha = 0.9;
-        ctx.beginPath(); ctx.moveTo(this.X(xa), clamp(this.Y(py + m * (xa - px)), -1e6, 1e6)); ctx.lineTo(this.X(xb), clamp(this.Y(py + m * (xb - px)), -1e6, 1e6)); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(this.X(xa), clamp(this.Y(py + m * (xa - px)), -4 * this.h, 5 * this.h)); ctx.lineTo(this.X(xb), clamp(this.Y(py + m * (xb - px)), -4 * this.h, 5 * this.h)); ctx.stroke();
         ctx.restore();
       };
       if (this.tools.tangent) {
